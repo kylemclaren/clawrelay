@@ -3,6 +3,7 @@
 import {
   Client,
   GatewayIntentBits,
+  Partials,
   type Message,
   type TextChannel,
   type DMChannel,
@@ -29,6 +30,10 @@ export class DiscordAdapter {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
+      ],
+      partials: [
+        Partials.Channel,  // Required for DM events
+        Partials.Message,
       ],
     });
 

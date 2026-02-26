@@ -60,12 +60,14 @@ export function loadConfig(configPath?: string): RelayConfig {
     },
     sandbox: {
       pluginUrl: process.env.SANDBOX_PLUGIN_URL ?? fileConfig.sandbox?.pluginUrl ?? 'http://localhost:7600',
-      healthPath: fileConfig.sandbox?.healthPath ?? '/relay/health',
-      inboundPath: fileConfig.sandbox?.inboundPath ?? '/relay/inbound',
+      healthPath: process.env.SANDBOX_HEALTH_PATH ?? fileConfig.sandbox?.healthPath ?? '/relay/health',
+      inboundPath: process.env.SANDBOX_INBOUND_PATH ?? fileConfig.sandbox?.inboundPath ?? '/relay/inbound',
       authToken: process.env.SANDBOX_AUTH_TOKEN ?? fileConfig.sandbox?.authToken ?? '',
     },
     wake: {
-      enabled: fileConfig.wake?.enabled ?? DEFAULTS.wake!.enabled,
+      enabled: process.env.WAKE_ENABLED !== undefined
+        ? process.env.WAKE_ENABLED === 'true'
+        : fileConfig.wake?.enabled ?? DEFAULTS.wake!.enabled,
       url: process.env.WAKE_URL ?? fileConfig.wake?.url,
       method: fileConfig.wake?.method ?? DEFAULTS.wake!.method,
       headers: fileConfig.wake?.headers,

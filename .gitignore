@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+
+# Config files with secrets
+relay.config.json
+
+# Environment files
+.env
+.env.*
+
+# OS files
+.DS_Store
+.tool-versions

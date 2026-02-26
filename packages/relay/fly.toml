@@ -1,0 +1,35 @@
+# fly.toml app configuration file generated for openclaw-relay on 2026-02-26T15:53:48+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'openclaw-relay'
+primary_region = 'iad'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  CALLBACK_PORT = '8080'
+  SANDBOX_HEALTH_PATH = '/relay/health'
+  SANDBOX_INBOUND_PATH = '/relay/inbound'
+  SANDBOX_PLUGIN_URL = 'https://openclaw-relay-dvft.sprites.app'
+  WAKE_ENABLED = 'false'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/health'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

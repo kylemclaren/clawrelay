@@ -29,7 +29,8 @@ export async function sendToRelay(
     return { ok: true };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    logger?.error(`[relay-channel] Callback failed: ${error}`);
+    const cause = err instanceof Error && err.cause ? ` cause=${String(err.cause)}` : '';
+    logger?.error(`[relay-channel] Callback failed: ${error}${cause} url=${callbackUrl}`);
     return { ok: false, error };
   }
 }
