@@ -6,26 +6,11 @@ The relay stays connected to Discord 24/7, queues incoming messages, optionally 
 
 ## Architecture
 
-```
-Discord User
-    │
-    ▼
-┌──────────────────────┐
-│   relay (always-on)  │  ← Fly.io / Docker
-│  Discord WebSocket   │
-│  Message queue       │
-│  Wake manager        │
-│  Callback server     │
-└──────────┬───────────┘
-           │  POST /relay/inbound
-           ▼
-┌──────────────────────┐
-│   sandbox (on-demand) │  ← Sprite / OpenClaw host
-│  relay-channel plugin │
-│  Agent pipeline       │
-│  POST /callback       │──→ back to relay
-└───────────────────────┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/arch-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/arch-light.png">
+  <img alt="Architecture diagram" src="docs/arch-light.png" width="700">
+</picture>
 
 ## Packages
 
