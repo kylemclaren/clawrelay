@@ -1,0 +1,26 @@
+{
+  "name": "@openclaw/relay",
+  "version": "0.1.0",
+  "description": "Always-on Discord relay with wake-on-message for OpenClaw sandboxes",
+  "main": "src/index.ts",
+  "type": "module",
+  "keywords": [
+    "openclaw",
+    "relay",
+    "discord",
+    "wake-on-message"
+  ],
+  "author": "Snowy Road",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.16.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "tsx": "^4.7.0"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  }
+}

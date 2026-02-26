@@ -1,0 +1,23 @@
+{
+  "discord": {
+    "token": "your-discord-bot-token (or set DISCORD_TOKEN env var)",
+    "allowedChannels": ["channel-id-1", "channel-id-2"]
+  },
+  "sandbox": {
+    "pluginUrl": "http://sprite-host:7600",
+    "healthPath": "/relay/health",
+    "inboundPath": "/relay/inbound",
+    "authToken": "shared-secret (or set SANDBOX_AUTH_TOKEN env var)"
+  },
+  "wake": {
+    "enabled": true,
+    "url": "https://your-wake-endpoint/wake",
+    "method": "POST",
+    "timeoutMs": 120000,
+    "pollIntervalMs": 3000
+  },
+  "callbackServer": {
+    "port": 7601,
+    "externalUrl": "https://relay.example.com (or set CALLBACK_EXTERNAL_URL env var)"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "relay-channel",
+  "name": "@openclaw/relay-channel",
+  "description": "Channel relay plugin — receives messages from an always-on relay proxy",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "channels": ["relay"],
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": true
+  }
+}
