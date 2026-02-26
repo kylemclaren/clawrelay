@@ -25,6 +25,9 @@
   ],
   "author": "Snowy Road",
   "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
   "devDependencies": {
     "typescript": "^5.3.0"
   },

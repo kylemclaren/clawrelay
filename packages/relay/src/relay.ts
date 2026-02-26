@@ -1,11 +1,12 @@
-// Relay - Core orchestration (queue, wake, forward, callback)
+// Relay - Core orchestration (queue, wake, WS forwarding)
 
 import type { Message } from 'discord.js';
 import type { RelayConfig } from './config.js';
 import type { RelayInboundMessage, QueueEntry } from './types.js';
 import { DiscordAdapter } from './discord.js';
 import { WakeManager } from './wake.js';
-import { CallbackServer } from './callback-server.js';
+import { WsClient } from './ws-client.js';
+import { HealthServer } from './health-server.js';
 
 const QUEUE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const TYPING_REFRESH_MS = 8_000;
@@ -14,7 +15,8 @@ const TYPING_MAX_MS = 3 * 60 * 1000; // 3 minutes
 export class Relay {
   private discord: DiscordAdapter;
   private wake: WakeManager;
-  private callbackServer: CallbackServer;
+  private ws: WsClient;
+  private healthServer: HealthServer;
   private config: RelayConfig;
   private logger: any;
 
@@ -34,11 +36,13 @@ export class Relay {
     });
 
     this.wake = new WakeManager(config, this.logger);
-    this.callbackServer = new CallbackServer(config.callbackServer.port, this.logger);
+    this.ws = new WsClient(config, this.logger);
+    this.healthServer = new HealthServer(config.healthServer.port, this.ws, this.logger);
   }
 
   async start(): Promise<void> {
-    await this.callbackServer.start();
+    await this.healthServer.start();
+    // WS connects on-demand when first message arrives — no persistent connection
     await this.discord.login();
     this.logger.info('[relay] Relay started');
   }
@@ -46,7 +50,8 @@ export class Relay {
   async stop(): Promise<void> {
     this.logger.info('[relay] Shutting down...');
     await this.discord.destroy();
-    await this.callbackServer.stop();
+    this.ws.stop();
+    await this.healthServer.stop();
     this.logger.info('[relay] Relay stopped');
   }
 
@@ -70,7 +75,6 @@ export class Relay {
       content: message.content,
       chatType: isDM ? 'direct' : 'group',
       groupName,
-      callbackUrl: `${this.config.callbackServer.externalUrl}/callback`,
       timestamp: message.createdTimestamp,
     };
 
@@ -108,12 +112,11 @@ export class Relay {
 
         if (this.queue.length === 0) break;
 
-        // Ensure sandbox is ready
+        // Ensure WS is connected (wake sprite if needed)
         try {
-          await this.wake.ensureReady();
+          await this.ensureWsConnected();
         } catch (err) {
-          this.logger.error(`[relay] Sandbox not ready, dropping ${this.queue.length} queued messages: ${err}`);
-          // Send error to Discord for each queued message
+          this.logger.error(`[relay] Cannot connect to sprite, dropping ${this.queue.length} queued messages: ${err}`);
           for (const entry of this.queue) {
             await this.sendError(entry.discordChannelId, 'Sandbox is not available. Please try again later.', entry.discordMessageId);
           }
@@ -128,6 +131,20 @@ export class Relay {
     } finally {
       this.processing = false;
     }
+  }
+
+  /**
+   * Ensure the WS connection is established. If not connected, wake the sprite
+   * first (if wake is enabled), then wait for the WS to connect.
+   */
+  private async ensureWsConnected(): Promise<void> {
+    if (this.ws.connected) return;
+
+    // Try waking the sprite first so the WS server is available
+    await this.wake.ensureReady();
+
+    // Now wait for WS to connect (it auto-reconnects in background)
+    await this.ws.ensureConnected();
   }
 
   private async forwardAndRespond(entry: QueueEntry): Promise<void> {
@@ -150,29 +167,16 @@ export class Relay {
     };
 
     try {
-      // Register callback FIRST to avoid race condition
-      const callbackPromise = this.callbackServer.waitForResponse(message.messageId);
+      // Register response handler FIRST to avoid race condition
+      const responsePromise = this.ws.waitForResponse(message.messageId);
 
-      // Forward to plugin
-      const inboundUrl = `${this.config.sandbox.pluginUrl}${this.config.sandbox.inboundPath}`;
-      const res = await fetch(inboundUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.config.sandbox.authToken}`,
-        },
-        body: JSON.stringify(message),
-      });
+      // Send over WebSocket
+      this.ws.send({ type: 'message', payload: message });
 
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Plugin rejected message: ${res.status} ${errText}`);
-      }
+      this.logger.info(`[relay] Sent message ${message.messageId} over WS`);
 
-      this.logger.info(`[relay] Forwarded message ${message.messageId} to plugin`);
-
-      // Wait for callback response
-      const response = await callbackPromise;
+      // Wait for response over WS
+      const response = await responsePromise;
 
       stopTyping();
 

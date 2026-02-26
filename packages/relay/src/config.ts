@@ -11,7 +11,7 @@ export interface RelayConfig {
   sandbox: {
     pluginUrl: string;
     healthPath: string;
-    inboundPath: string;
+    wsPath: string;
     authToken: string;
   };
   wake: {
@@ -23,9 +23,8 @@ export interface RelayConfig {
     timeoutMs?: number;
     pollIntervalMs?: number;
   };
-  callbackServer: {
+  healthServer: {
     port: number;
-    externalUrl: string;
   };
 }
 
@@ -61,7 +60,7 @@ export function loadConfig(configPath?: string): RelayConfig {
     sandbox: {
       pluginUrl: process.env.SANDBOX_PLUGIN_URL ?? fileConfig.sandbox?.pluginUrl ?? 'http://localhost:7600',
       healthPath: process.env.SANDBOX_HEALTH_PATH ?? fileConfig.sandbox?.healthPath ?? '/relay/health',
-      inboundPath: process.env.SANDBOX_INBOUND_PATH ?? fileConfig.sandbox?.inboundPath ?? '/relay/inbound',
+      wsPath: process.env.SANDBOX_WS_PATH ?? fileConfig.sandbox?.wsPath ?? '/relay/ws',
       authToken: process.env.SANDBOX_AUTH_TOKEN ?? fileConfig.sandbox?.authToken ?? '',
     },
     wake: {
@@ -75,9 +74,8 @@ export function loadConfig(configPath?: string): RelayConfig {
       timeoutMs: fileConfig.wake?.timeoutMs ?? DEFAULTS.wake!.timeoutMs,
       pollIntervalMs: fileConfig.wake?.pollIntervalMs ?? DEFAULTS.wake!.pollIntervalMs,
     },
-    callbackServer: {
-      port: Number(process.env.CALLBACK_PORT ?? fileConfig.callbackServer?.port ?? 7601),
-      externalUrl: process.env.CALLBACK_EXTERNAL_URL ?? fileConfig.callbackServer?.externalUrl ?? '',
+    healthServer: {
+      port: Number(process.env.HEALTH_PORT ?? fileConfig.healthServer?.port ?? 8080),
     },
   };
 
@@ -87,9 +85,6 @@ export function loadConfig(configPath?: string): RelayConfig {
   }
   if (!config.sandbox.authToken) {
     throw new Error('Sandbox auth token is required (SANDBOX_AUTH_TOKEN env or sandbox.authToken in config)');
-  }
-  if (!config.callbackServer.externalUrl) {
-    throw new Error('Callback external URL is required (CALLBACK_EXTERNAL_URL env or callbackServer.externalUrl in config)');
   }
 
   return config;

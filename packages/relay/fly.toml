@@ -10,11 +10,11 @@ primary_region = 'iad'
   dockerfile = 'Dockerfile'
 
 [env]
-  CALLBACK_PORT = '8080'
+  HEALTH_PORT = '8080'
   SANDBOX_HEALTH_PATH = '/relay/health'
-  SANDBOX_INBOUND_PATH = '/relay/inbound'
+  SANDBOX_WS_PATH = '/relay/ws'
   SANDBOX_PLUGIN_URL = 'https://openclaw-relay-dvft.sprites.app'
-  WAKE_ENABLED = 'false'
+  WAKE_ENABLED = 'true'
 
 [http_service]
   internal_port = 8080

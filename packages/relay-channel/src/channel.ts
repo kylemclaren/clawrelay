@@ -1,8 +1,7 @@
 // Relay Channel Plugin Definition
 
-import type { RelayAccount, RelayInboundMessage } from './types.js';
+import type { RelayAccount, RelayInboundMessage, RelayOutboundMessage, ReplyFn } from './types.js';
 import { InboundServer } from './inbound-server.js';
-import { sendToRelay } from './outbound.js';
 import { getRelayRuntime } from './runtime.js';
 
 const CHANNEL_ID = 'relay' as const;
@@ -79,25 +78,22 @@ export function createRelayChannel(api: any) {
           port: account.port,
           authToken: account.authToken,
           logger: ctx.log ?? logger,
-          onMessage: (message: RelayInboundMessage) => {
+          onMessage: (message: RelayInboundMessage, reply: ReplyFn) => {
             handleRelayInbound({
               message,
+              reply,
               account,
               config: ctx.cfg,
               log: ctx.log ?? logger,
             }).catch((err) => {
               const errMsg = err instanceof Error ? err.message : String(err);
               (ctx.log ?? logger).error(`[relay-channel] Failed to process inbound: ${errMsg}`);
-              // Best-effort error callback to relay
-              sendToRelay(
-                message.callbackUrl,
-                {
-                  messageId: message.messageId,
-                  content: `[Relay Plugin] Error processing message: ${errMsg}`,
-                  replyToMessageId: message.messageId,
-                },
-                ctx.log ?? logger,
-              ).catch(() => {});
+              // Best-effort error response over WS
+              reply({
+                messageId: message.messageId,
+                content: `[Relay Plugin] Error processing message: ${errMsg}`,
+                replyToMessageId: message.messageId,
+              });
             });
           },
         });
@@ -151,10 +147,10 @@ export function createRelayChannel(api: any) {
         cfg: any;
       }) => {
         // Outbound via sendText is not the primary path for relay-channel.
-        // The main response path is via callback URL in handleRelayInbound.
+        // The main response path is via WebSocket reply.
         // This exists for completeness if OpenClaw core needs to send proactively.
-        logger.warn(`[relay-channel] sendText called for chatId=${chatId} — relay-channel uses callback URLs for responses`);
-        return { ok: false, error: 'Relay channel uses callback URLs for responses, not sendText' };
+        logger.warn(`[relay-channel] sendText called for chatId=${chatId} — relay-channel uses WS for responses`);
+        return { ok: false, error: 'Relay channel uses WebSocket for responses, not sendText' };
       },
     },
 
@@ -164,7 +160,7 @@ export function createRelayChannel(api: any) {
         if (!server) {
           return { status: 'disconnected', message: 'Server not running' };
         }
-        return { status: 'connected', message: 'Inbound server listening' };
+        return { status: 'connected', message: 'Server listening (HTTP + WS)' };
       },
     },
   };
@@ -191,11 +187,12 @@ function resolvePeerId(message: RelayInboundMessage): string {
 
 async function handleRelayInbound(params: {
   message: RelayInboundMessage;
+  reply: ReplyFn;
   account: RelayAccount;
   config: any;
   log: any;
 }): Promise<void> {
-  const { message, account, config, log } = params;
+  const { message, reply, account, config, log } = params;
 
   let core;
   try {
@@ -272,7 +269,7 @@ async function handleRelayInbound(params: {
     },
   });
 
-  // Dispatch reply — triggers agent processing and delivers response via callback
+  // Dispatch reply — triggers agent processing and delivers response via WS
   await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
     ctx: ctxPayload,
     cfg: config,
@@ -281,15 +278,11 @@ async function handleRelayInbound(params: {
         const text = payload.text ?? '';
         if (!text.trim()) return;
 
-        await sendToRelay(
-          message.callbackUrl,
-          {
-            messageId: message.messageId,
-            content: text,
-            replyToMessageId: message.messageId,
-          },
-          log,
-        );
+        reply({
+          messageId: message.messageId,
+          content: text,
+          replyToMessageId: message.messageId,
+        });
       },
       onError: (err: unknown, info: { kind: string }) => {
         log?.error(`[relay-channel] ${info.kind} reply failed: ${String(err)}`);

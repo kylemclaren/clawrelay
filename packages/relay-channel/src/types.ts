@@ -18,7 +18,6 @@ export interface RelayInboundMessage {
   content: string;
   chatType: 'group' | 'direct';
   groupName?: string;
-  callbackUrl: string;
   timestamp: number;
 }
 
@@ -28,3 +27,11 @@ export interface RelayOutboundMessage {
   content: string;
   replyToMessageId?: string;
 }
+
+// WebSocket protocol envelope
+export type WsEnvelope =
+  | { type: 'message'; payload: RelayInboundMessage }
+  | { type: 'response'; payload: RelayOutboundMessage };
+
+// Reply function passed to message handlers
+export type ReplyFn = (response: RelayOutboundMessage) => void;
