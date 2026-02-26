@@ -1,4 +1,4 @@
-# clawrelay
+<h1 align="center">🦞 ClawRelay 📡</h1>
 
 A wake-on-message relay bridge that keeps a Discord bot permanently online while letting the AI backend (an OpenClaw sandbox/sprite) sleep to save costs.
 
