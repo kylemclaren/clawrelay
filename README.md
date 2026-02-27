@@ -1,8 +1,8 @@
 <h1 align="center">🦞 ClawRelay 📡</h1>
 
-A wake-on-message relay bridge that keeps a Discord bot permanently online while letting the AI backend (an OpenClaw sandbox/sprite) sleep to save costs.
+A wake-on-message relay bridge that keeps Discord and Telegram bots permanently online while letting the AI backend (an OpenClaw sandbox/sprite) sleep to save costs.
 
-The relay stays connected to Discord 24/7, queues incoming messages, optionally wakes a stopped sandbox, connects to the OpenClaw gateway via WebSocket, forwards messages as `relay.inbound` method calls, and delivers responses back to Discord.
+The relay stays connected to Discord and Telegram 24/7, queues incoming messages, optionally wakes a stopped sandbox, connects to the OpenClaw gateway via WebSocket, forwards messages as `relay.inbound` method calls, and delivers responses back to the originating platform.
 
 ## Architecture
 
@@ -16,29 +16,31 @@ The relay stays connected to Discord 24/7, queues incoming messages, optionally 
 
 | Package | Description |
 |---|---|
-| [`packages/relay`](packages/relay) | Always-on relay service — Discord gateway, message queue, wake manager, gateway WS client |
+| [`packages/relay`](packages/relay) | Always-on relay service — Discord & Telegram adapters, message queue, wake manager, gateway WS client |
 | [`packages/relay-channel`](packages/relay-channel) | OpenClaw channel plugin — registers `relay.inbound` gateway method and `/relay/health` HTTP route |
 
 ## How it works
 
-1. Discord message arrives at the relay service via Discord WebSocket
-2. Message is queued; typing indicator starts in Discord
-3. Wake manager checks gateway health at `/relay/health` (wakes sprite if needed)
-4. Relay connects to the OpenClaw gateway WS and authenticates via the gateway protocol
-5. Message is sent as a `relay.inbound` gateway method call
-6. The channel plugin dispatches the message through the OpenClaw agent pipeline
-7. Agent response is returned in the gateway method response
-8. Relay delivers the response back to Discord as a reply
+1. Message arrives from Discord (WebSocket) or Telegram (long-polling)
+2. The platform adapter normalizes the message into a common format
+3. Message is queued; typing indicator starts on the originating platform
+4. Wake manager checks gateway health at `/relay/health` (wakes sprite if needed)
+5. Relay connects to the OpenClaw gateway WS and authenticates via the gateway protocol
+6. Message is sent as a `relay.inbound` gateway method call
+7. The channel plugin dispatches the message through the OpenClaw agent pipeline
+8. Agent response is returned in the gateway method response
+9. Relay delivers the response back to the originating platform as a reply
 
 ## Features
 
+- **Multi-platform** — Supports Discord and Telegram via a shared adapter interface; run one or both simultaneously
 - **Gateway protocol** — Relay authenticates as a gateway client and sends messages as method calls (no separate server port needed)
 - **Wake-on-message** — Wakes a sleeping sprite on first message, polls `/relay/health` until ready
 - **Message queue** — In-memory FIFO with 5-minute TTL, serial processing
-- **DM support** — Handles both guild channels and direct messages
+- **DM support** — Handles both guild channels and direct messages (Discord) and private/group chats (Telegram)
 - **Typing indicators** — Shows typing while waiting for AI response (refreshed every 8s, max 3 min)
-- **Message splitting** — Splits responses exceeding Discord's 2000-char limit at newlines/spaces
-- **Guild/channel allowlists** — Restrict which servers and channels the bot responds in
+- **Message splitting** — Splits responses respecting platform limits (Discord 2000 chars, Telegram 4096 chars)
+- **Allowlists** — Restrict which Discord servers/channels or Telegram chats the bot responds in
 - **Graceful shutdown** — Clean teardown on SIGINT/SIGTERM
 
 ## Configuration
@@ -47,13 +49,16 @@ Config is loaded from `relay.config.json` (or `RELAY_CONFIG` env) with environme
 
 | Setting | Env var | Default |
 |---|---|---|
-| Discord token | `DISCORD_TOKEN` | — (required) |
+| Discord token | `DISCORD_TOKEN` | — |
+| Telegram bot token | `TELEGRAM_BOT_TOKEN` | — |
 | Gateway URL | `GATEWAY_URL` | `http://localhost:18789` |
 | Gateway auth token | `GATEWAY_AUTH_TOKEN` | — (required) |
 | Health path | `GATEWAY_HEALTH_PATH` | `/relay/health` |
 | Wake enabled | `WAKE_ENABLED` | `false` |
 | Wake URL | `WAKE_URL` | — |
 | Health server port | `HEALTH_PORT` | `8080` |
+
+At least one platform token (Discord or Telegram) is required. Both can be configured to run simultaneously.
 
 ## Deployment
 
@@ -65,7 +70,7 @@ The relay runs on Fly.io, connected to an OpenClaw gateway running on a sprite.
 # Deploy the relay
 cd packages/relay
 fly deploy
-fly secrets set DISCORD_TOKEN="..." GATEWAY_AUTH_TOKEN="..."
+fly secrets set DISCORD_TOKEN="..." TELEGRAM_BOT_TOKEN="..." GATEWAY_AUTH_TOKEN="..."
 ```
 
 The gateway URL is set in `fly.toml` via the `GATEWAY_URL` env var, pointing to the sprite's public URL (e.g. `https://my-app.sprites.app`).
@@ -83,12 +88,13 @@ openclaw gateway --allow-unconfigured
 
 ```bash
 export DISCORD_TOKEN=your-token
+export TELEGRAM_BOT_TOKEN=your-bot-token
 export OPENCLAW_GATEWAY_TOKEN=your-gateway-token
 
 docker compose --profile discord up
 ```
 
-This starts both the OpenClaw gateway and the relay service.
+This starts both the OpenClaw gateway and the relay service. Omit either token to run only one platform.
 
 ## Development
 
