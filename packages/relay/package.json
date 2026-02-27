@@ -1,5 +1,5 @@
 {
-  "name": "@openclaw/relay",
+  "name": "clawrelay-service",
   "version": "0.1.0",
   "description": "Always-on Discord relay with wake-on-message for OpenClaw sandboxes",
   "main": "src/index.ts",

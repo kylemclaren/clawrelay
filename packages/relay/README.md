@@ -1,4 +1,4 @@
-# @openclaw/relay
+# ClawRelay
 
 Always-on Discord relay service. Maintains a persistent Discord WebSocket connection, queues incoming messages, optionally wakes a sleeping sandbox, forwards messages to the OpenClaw gateway for AI processing, and delivers responses back to Discord.
 
