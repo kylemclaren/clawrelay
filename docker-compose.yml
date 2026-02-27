@@ -11,8 +11,7 @@ services:
       # Mount relay-channel plugin into extensions for auto-discovery
       - ./packages/relay-channel:/home/node/.openclaw/extensions/relay-channel:ro
     ports:
-      - "18789:18789"   # Gateway API
-      - "7600:7600"     # Relay channel inbound server
+      - "18789:18789"   # Gateway API (HTTP + WS)
     init: true
     restart: unless-stopped
     command:
@@ -33,12 +32,11 @@ services:
       dockerfile: Dockerfile.relay
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:-}
-      SANDBOX_PLUGIN_URL: http://gateway:7600
-      SANDBOX_AUTH_TOKEN: test-secret
-      CALLBACK_EXTERNAL_URL: http://relay:7601
-      CALLBACK_PORT: "7601"
+      GATEWAY_URL: http://gateway:18789
+      GATEWAY_AUTH_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-test-token}
+      HEALTH_PORT: "8080"
     ports:
-      - "7601:7601"     # Callback server
+      - "8080:8080"     # Health server
     init: true
     restart: unless-stopped
     depends_on:

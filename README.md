@@ -2,7 +2,7 @@
 
 A wake-on-message relay bridge that keeps a Discord bot permanently online while letting the AI backend (an OpenClaw sandbox/sprite) sleep to save costs.
 
-The relay stays connected to Discord 24/7, queues incoming messages, optionally wakes a stopped sandbox, forwards messages for processing, and delivers responses back to Discord.
+The relay stays connected to Discord 24/7, queues incoming messages, optionally wakes a stopped sandbox, connects to the OpenClaw gateway via WebSocket, forwards messages as `relay.inbound` method calls, and delivers responses back to Discord.
 
 ## Architecture
 
@@ -16,13 +16,24 @@ The relay stays connected to Discord 24/7, queues incoming messages, optionally 
 
 | Package | Description |
 |---|---|
-| `packages/relay` | Always-on relay service — Discord gateway, message queue, wake manager, callback server |
-| `packages/relay-channel` | OpenClaw plugin that runs inside the sandbox, receives forwarded messages and dispatches them through the agent pipeline |
+| [`packages/relay`](packages/relay) | Always-on relay service — Discord gateway, message queue, wake manager, gateway WS client |
+| [`packages/relay-channel`](packages/relay-channel) | OpenClaw channel plugin — registers `relay.inbound` gateway method and `/relay/health` HTTP route |
+
+## How it works
+
+1. Discord message arrives at the relay service via Discord WebSocket
+2. Message is queued; typing indicator starts in Discord
+3. Wake manager checks gateway health at `/relay/health` (wakes sprite if needed)
+4. Relay connects to the OpenClaw gateway WS and authenticates via the gateway protocol
+5. Message is sent as a `relay.inbound` gateway method call
+6. The channel plugin dispatches the message through the OpenClaw agent pipeline
+7. Agent response is returned in the gateway method response
+8. Relay delivers the response back to Discord as a reply
 
 ## Features
 
-- **Wake-on-message** — Wakes a sleeping sandbox on first message, polls health until ready, coalesces concurrent wake calls
-- **Async callback pattern** — Registers pending callbacks before forwarding; sandbox POSTs responses back when ready (5 min timeout)
+- **Gateway protocol** — Relay authenticates as a gateway client and sends messages as method calls (no separate server port needed)
+- **Wake-on-message** — Wakes a sleeping sprite on first message, polls `/relay/health` until ready
 - **Message queue** — In-memory FIFO with 5-minute TTL, serial processing
 - **DM support** — Handles both guild channels and direct messages
 - **Typing indicators** — Shows typing while waiting for AI response (refreshed every 8s, max 3 min)
@@ -37,47 +48,55 @@ Config is loaded from `relay.config.json` (or `RELAY_CONFIG` env) with environme
 | Setting | Env var | Default |
 |---|---|---|
 | Discord token | `DISCORD_TOKEN` | — (required) |
-| Sandbox URL | `SANDBOX_PLUGIN_URL` | `http://localhost:7600` |
-| Sandbox auth token | `SANDBOX_AUTH_TOKEN` | — (required) |
-| Health path | `SANDBOX_HEALTH_PATH` | `/relay/health` |
-| Inbound path | `SANDBOX_INBOUND_PATH` | `/relay/inbound` |
+| Gateway URL | `GATEWAY_URL` | `http://localhost:18789` |
+| Gateway auth token | `GATEWAY_AUTH_TOKEN` | — (required) |
+| Health path | `GATEWAY_HEALTH_PATH` | `/relay/health` |
 | Wake enabled | `WAKE_ENABLED` | `false` |
 | Wake URL | `WAKE_URL` | — |
-| Callback port | `CALLBACK_PORT` | `7601` |
-| Callback external URL | `CALLBACK_EXTERNAL_URL` | — (required) |
+| Health server port | `HEALTH_PORT` | `8080` |
 
 ## Deployment
+
+### Fly.io + Sprites
+
+The relay runs on Fly.io, connected to an OpenClaw gateway running on a sprite.
+
+```bash
+# Deploy the relay
+cd packages/relay
+fly deploy
+fly secrets set DISCORD_TOKEN="..." GATEWAY_AUTH_TOKEN="..."
+```
+
+The gateway URL is set in `fly.toml` via the `GATEWAY_URL` env var, pointing to the sprite's public URL (e.g. `https://my-app.sprites.app`).
+
+On the sprite, install the channel plugin and start the gateway:
+
+```bash
+openclaw plugins install clawrelay
+openclaw onboard    # Configure the relay channel auth token
+openclaw gateway --allow-unconfigured
+```
 
 ### Docker Compose (local)
 
 ```bash
-# Set your Discord token
 export DISCORD_TOKEN=your-token
-export SANDBOX_AUTH_TOKEN=your-shared-secret
+export OPENCLAW_GATEWAY_TOKEN=your-gateway-token
 
 docker compose --profile discord up
 ```
 
-This starts both the OpenClaw sandbox (gateway) and the relay service.
-
-### Fly.io
-
-The relay is configured for Fly.io deployment in [`packages/relay/fly.toml`](packages/relay/fly.toml).
-
-```bash
-cd packages/relay
-fly deploy
-fly secrets set DISCORD_TOKEN=your-token SANDBOX_AUTH_TOKEN=your-shared-secret
-```
+This starts both the OpenClaw gateway and the relay service.
 
 ## Development
 
-Requires Node.js 22+. TypeScript is run directly with `tsx` (no build step).
+Requires Bun. TypeScript is run directly (no build step).
 
 ```bash
 cd packages/relay
-npm install
-npx tsx src/index.ts
+bun install
+bun start
 ```
 
 ## License
