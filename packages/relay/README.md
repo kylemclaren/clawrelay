@@ -1,6 +1,8 @@
 # ClawRelay
 
-Always-on Discord relay service. Maintains a persistent Discord WebSocket connection, queues incoming messages, optionally wakes a sleeping sandbox, forwards messages to the OpenClaw gateway for AI processing, and delivers responses back to Discord.
+Always-on relay service for Discord, Telegram, and other chat platforms. Maintains persistent connections, queues incoming messages, wakes sleeping sandboxes on demand, forwards messages to the OpenClaw gateway for AI processing, and delivers responses back to the originating platform.
+
+The relay is designed to run on a cheap, always-on VPS (e.g. a $3/mo Fly.io or Hetzner instance), while OpenClaw itself runs on more capable cloud sandboxes that sleep when idle — so you only pay for compute when messages are actually being processed.
 
 ## How it works
 
