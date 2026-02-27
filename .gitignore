@@ -12,3 +12,6 @@ relay.config.json
 # OS files
 .DS_Store
 .tool-versions
+
+# Sprites
+.sprite
