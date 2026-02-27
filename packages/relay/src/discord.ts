@@ -39,7 +39,7 @@ export class DiscordAdapter {
 
     this.client.on('messageCreate', (msg) => this.handleMessage(msg));
 
-    this.client.on('ready', () => {
+    this.client.on('clientReady', () => {
       options.logger?.info(`[relay] Discord connected as ${this.client.user?.tag}`);
     });
 
