@@ -1,7 +1,7 @@
-FROM node:22-bookworm-slim
+FROM oven/bun:latest
 WORKDIR /app
-COPY package.json ./
-RUN npm install
+COPY package.json bun.lock ./
+RUN bun install --production
 COPY src ./src
 COPY tsconfig.json ./
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["bun", "run", "src/index.ts"]
