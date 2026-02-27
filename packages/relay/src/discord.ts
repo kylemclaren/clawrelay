@@ -8,16 +8,21 @@ import {
   type TextChannel,
   type DMChannel,
 } from 'discord.js';
+import type { ChannelAdapter, OnInboundMessage } from './adapter.js';
+import type { RelayInboundMessage } from './types.js';
+import { splitMessage } from './split-message.js';
 
 export interface DiscordAdapterOptions {
   token: string;
   allowedGuilds?: string[];
   allowedChannels?: string[];
-  onMessage: (message: Message) => void;
+  onMessage: OnInboundMessage;
   logger?: any;
 }
 
-export class DiscordAdapter {
+export class DiscordAdapter implements ChannelAdapter {
+  readonly platform = 'discord';
+
   private client: Client;
   private options: DiscordAdapterOptions;
 
@@ -68,7 +73,30 @@ export class DiscordAdapter {
       if (!this.options.allowedChannels.includes(message.channelId)) return;
     }
 
-    this.options.onMessage(message);
+    // Convert Discord Message to RelayInboundMessage
+    const isDM = !message.guild;
+    const guildId = message.guild?.id;
+    const guildName = message.guild?.name;
+    const channelName = 'name' in message.channel ? (message.channel as any).name : 'DM';
+
+    const groupName = isDM
+      ? undefined
+      : `${guildName} #${channelName}`;
+
+    const inbound: RelayInboundMessage = {
+      messageId: message.id,
+      platform: 'discord',
+      channelId: message.channelId,
+      guildId,
+      senderId: message.author.id,
+      senderName: message.member?.displayName ?? message.author.displayName ?? message.author.username,
+      content: message.content,
+      chatType: isDM ? 'direct' : 'group',
+      groupName,
+      timestamp: message.createdTimestamp,
+    };
+
+    this.options.onMessage(inbound);
   }
 
   async sendTyping(channelId: string): Promise<void> {
@@ -117,34 +145,4 @@ export class DiscordAdapter {
   get botUserId(): string | undefined {
     return this.client.user?.id;
   }
-}
-
-function splitMessage(content: string, maxLength: number): string[] {
-  if (content.length <= maxLength) return [content];
-
-  const chunks: string[] = [];
-  let remaining = content;
-
-  while (remaining.length > 0) {
-    if (remaining.length <= maxLength) {
-      chunks.push(remaining);
-      break;
-    }
-
-    // Try to split at a newline near the limit
-    let splitIdx = remaining.lastIndexOf('\n', maxLength);
-    if (splitIdx < maxLength * 0.5) {
-      // No good newline break, split at space
-      splitIdx = remaining.lastIndexOf(' ', maxLength);
-    }
-    if (splitIdx < maxLength * 0.5) {
-      // No good break at all, hard split
-      splitIdx = maxLength;
-    }
-
-    chunks.push(remaining.slice(0, splitIdx));
-    remaining = remaining.slice(splitIdx).trimStart();
-  }
-
-  return chunks;
 }

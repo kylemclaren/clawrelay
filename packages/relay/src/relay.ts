@@ -1,9 +1,10 @@
 // Relay - Core orchestration (queue, wake, WS forwarding)
 
-import type { Message } from 'discord.js';
 import type { RelayConfig } from './config.js';
 import type { RelayInboundMessage, QueueEntry } from './types.js';
+import type { ChannelAdapter } from './adapter.js';
 import { DiscordAdapter } from './discord.js';
+import { TelegramAdapter } from './telegram.js';
 import { WakeManager } from './wake.js';
 import { WsClient } from './ws-client.js';
 import { HealthServer } from './health-server.js';
@@ -13,7 +14,7 @@ const TYPING_REFRESH_MS = 8_000;
 const TYPING_MAX_MS = 3 * 60 * 1000; // 3 minutes
 
 export class Relay {
-  private discord: DiscordAdapter;
+  private adapters = new Map<string, ChannelAdapter>();
   private wake: WakeManager;
   private ws: WsClient;
   private healthServer: HealthServer;
@@ -27,13 +28,31 @@ export class Relay {
     this.config = config;
     this.logger = logger ?? console;
 
-    this.discord = new DiscordAdapter({
-      token: config.discord.token,
-      allowedGuilds: config.discord.allowedGuilds,
-      allowedChannels: config.discord.allowedChannels,
-      onMessage: (msg) => this.onDiscordMessage(msg),
-      logger: this.logger,
-    });
+    // Register adapters based on config
+    if (config.discord) {
+      const discord = new DiscordAdapter({
+        token: config.discord.token,
+        allowedGuilds: config.discord.allowedGuilds,
+        allowedChannels: config.discord.allowedChannels,
+        onMessage: (msg) => this.onInboundMessage(msg),
+        logger: this.logger,
+      });
+      this.adapters.set(discord.platform, discord);
+    }
+
+    if (config.telegram) {
+      const telegram = new TelegramAdapter({
+        botToken: config.telegram.botToken,
+        allowedChats: config.telegram.allowedChats,
+        onMessage: (msg) => this.onInboundMessage(msg),
+        logger: this.logger,
+      });
+      this.adapters.set(telegram.platform, telegram);
+    }
+
+    if (this.adapters.size === 0) {
+      throw new Error('No channel adapters configured');
+    }
 
     this.wake = new WakeManager(config, this.logger);
     this.ws = new WsClient(config, this.logger);
@@ -43,53 +62,38 @@ export class Relay {
   async start(): Promise<void> {
     await this.healthServer.start();
     // WS connects on-demand when first message arrives — no persistent connection
-    await this.discord.login();
-    this.logger.info('[relay] Relay started');
+    for (const adapter of this.adapters.values()) {
+      await adapter.login();
+    }
+    const platforms = [...this.adapters.keys()].join(', ');
+    this.logger.info(`[relay] Relay started with adapters: ${platforms}`);
   }
 
   async stop(): Promise<void> {
     this.logger.info('[relay] Shutting down...');
-    await this.discord.destroy();
+    for (const adapter of this.adapters.values()) {
+      await adapter.destroy();
+    }
     this.ws.stop();
     await this.healthServer.stop();
     this.logger.info('[relay] Relay stopped');
   }
 
-  private onDiscordMessage(message: Message) {
-    const isDM = !message.guild;
-    const guildId = message.guild?.id;
-    const guildName = message.guild?.name;
-    const channelName = 'name' in message.channel ? (message.channel as any).name : 'DM';
-
-    const groupName = isDM
-      ? undefined
-      : `${guildName} #${channelName}`;
-
-    const inbound: RelayInboundMessage = {
-      messageId: message.id,
-      platform: 'discord',
-      channelId: message.channelId,
-      guildId,
-      senderId: message.author.id,
-      senderName: message.member?.displayName ?? message.author.displayName ?? message.author.username,
-      content: message.content,
-      chatType: isDM ? 'direct' : 'group',
-      groupName,
-      timestamp: message.createdTimestamp,
-    };
-
+  private onInboundMessage(message: RelayInboundMessage) {
     const entry: QueueEntry = {
-      message: inbound,
-      discordChannelId: message.channelId,
-      discordMessageId: message.id,
+      message,
+      platform: message.platform,
+      channelId: message.channelId,
+      messageId: message.messageId,
       enqueuedAt: Date.now(),
     };
 
     this.queue.push(entry);
-    this.logger.info(`[relay] Queued message ${message.id} from ${inbound.senderName} in ${groupName ?? 'DM'}`);
+    this.logger.info(`[relay] Queued message ${message.messageId} from ${message.senderName} in ${message.groupName ?? 'DM'} (${message.platform})`);
 
     // Start typing immediately
-    this.discord.sendTyping(message.channelId);
+    const adapter = this.adapters.get(message.platform);
+    adapter?.sendTyping(message.channelId);
 
     this.processQueue();
   }
@@ -118,7 +122,7 @@ export class Relay {
         } catch (err) {
           this.logger.error(`[relay] Cannot connect to sprite, dropping ${this.queue.length} queued messages: ${err}`);
           for (const entry of this.queue) {
-            await this.sendError(entry.discordChannelId, 'Sandbox is not available. Please try again later.', entry.discordMessageId);
+            await this.sendError(entry.platform, entry.channelId, 'Sandbox is not available. Please try again later.', entry.messageId);
           }
           this.queue = [];
           break;
@@ -148,12 +152,17 @@ export class Relay {
   }
 
   private async forwardAndRespond(entry: QueueEntry): Promise<void> {
-    const { message, discordChannelId, discordMessageId } = entry;
+    const { message, platform, channelId, messageId } = entry;
+    const adapter = this.adapters.get(platform);
+    if (!adapter) {
+      this.logger.error(`[relay] No adapter for platform "${platform}", dropping message ${messageId}`);
+      return;
+    }
 
     // Typing indicator with refresh
     let typingActive = true;
     const typingInterval = setInterval(() => {
-      if (typingActive) this.discord.sendTyping(discordChannelId);
+      if (typingActive) adapter.sendTyping(channelId);
     }, TYPING_REFRESH_MS);
     const typingTimeout = setTimeout(() => {
       typingActive = false;
@@ -180,21 +189,22 @@ export class Relay {
 
       stopTyping();
 
-      // Send to Discord
-      await this.discord.sendMessage(discordChannelId, response.content, discordMessageId);
+      // Send response via the originating adapter
+      await adapter.sendMessage(channelId, response.content, messageId);
       this.logger.info(`[relay] Delivered response for message ${message.messageId}`);
     } catch (err) {
       stopTyping();
       const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(`[relay] Failed to process message ${message.messageId}: ${errMsg}`);
       this.wake.markUnknown();
-      await this.sendError(discordChannelId, `Something went wrong processing your message.`, discordMessageId);
+      await this.sendError(platform, channelId, `Something went wrong processing your message.`, messageId);
     }
   }
 
-  private async sendError(channelId: string, text: string, replyTo?: string): Promise<void> {
+  private async sendError(platform: string, channelId: string, text: string, replyTo?: string): Promise<void> {
     try {
-      await this.discord.sendMessage(channelId, text, replyTo);
+      const adapter = this.adapters.get(platform);
+      await adapter?.sendMessage(channelId, text, replyTo);
     } catch (err) {
       this.logger.error(`[relay] Failed to send error message: ${err}`);
     }

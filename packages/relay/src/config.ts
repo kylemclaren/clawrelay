@@ -3,10 +3,14 @@
 import { readFileSync } from 'node:fs';
 
 export interface RelayConfig {
-  discord: {
+  discord?: {
     token: string;
     allowedGuilds?: string[];
     allowedChannels?: string[];
+  };
+  telegram?: {
+    botToken: string;
+    allowedChats?: string[];
   };
   gateway: {
     url: string;
@@ -50,12 +54,28 @@ export function loadConfig(configPath?: string): RelayConfig {
     }
   }
 
+  // Build discord config if token is available
+  const discordToken = process.env.DISCORD_TOKEN ?? fileConfig.discord?.token;
+  const discord = discordToken
+    ? {
+        token: discordToken,
+        allowedGuilds: fileConfig.discord?.allowedGuilds as string[] | undefined,
+        allowedChannels: fileConfig.discord?.allowedChannels as string[] | undefined,
+      }
+    : undefined;
+
+  // Build telegram config if token is available
+  const telegramToken = process.env.TELEGRAM_BOT_TOKEN ?? fileConfig.telegram?.botToken;
+  const telegram = telegramToken
+    ? {
+        botToken: telegramToken,
+        allowedChats: fileConfig.telegram?.allowedChats as string[] | undefined,
+      }
+    : undefined;
+
   const config: RelayConfig = {
-    discord: {
-      token: process.env.DISCORD_TOKEN ?? fileConfig.discord?.token ?? '',
-      allowedGuilds: fileConfig.discord?.allowedGuilds,
-      allowedChannels: fileConfig.discord?.allowedChannels,
-    },
+    discord,
+    telegram,
     gateway: {
       url: process.env.GATEWAY_URL ?? fileConfig.gateway?.url ?? 'http://localhost:18789',
       authToken: process.env.GATEWAY_AUTH_TOKEN ?? fileConfig.gateway?.authToken ?? '',
@@ -78,8 +98,8 @@ export function loadConfig(configPath?: string): RelayConfig {
   };
 
   // Validate required fields
-  if (!config.discord.token) {
-    throw new Error('Discord token is required (DISCORD_TOKEN env or discord.token in config)');
+  if (!config.discord && !config.telegram) {
+    throw new Error('At least one channel must be configured (DISCORD_TOKEN or TELEGRAM_BOT_TOKEN)');
   }
   if (!config.gateway.authToken) {
     throw new Error('Gateway auth token is required (GATEWAY_AUTH_TOKEN env or gateway.authToken in config)');

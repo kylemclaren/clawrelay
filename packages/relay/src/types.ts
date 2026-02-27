@@ -54,7 +54,8 @@ export type GatewayFrame = GatewayReqFrame | GatewayResFrame | GatewayEventFrame
 // Internal queue entry
 export interface QueueEntry {
   message: RelayInboundMessage;
-  discordChannelId: string;
-  discordMessageId: string;
+  platform: string;
+  channelId: string;
+  messageId: string;
   enqueuedAt: number;
 }
