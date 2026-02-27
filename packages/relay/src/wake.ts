@@ -80,7 +80,7 @@ export class WakeManager {
   }
 
   private async checkHealth(): Promise<boolean> {
-    const url = `${this.config.sandbox.pluginUrl}${this.config.sandbox.healthPath}`;
+    const url = `${this.config.gateway.url}${this.config.gateway.healthPath}`;
     try {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(5_000),

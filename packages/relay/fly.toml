@@ -11,9 +11,7 @@ primary_region = 'iad'
 
 [env]
   HEALTH_PORT = '8080'
-  SANDBOX_HEALTH_PATH = '/relay/health'
-  SANDBOX_WS_PATH = '/relay/ws'
-  SANDBOX_PLUGIN_URL = 'https://openclaw-relay-dvft.sprites.app'
+  GATEWAY_URL = 'https://openclaw-relay-2-dvft.sprites.app'
   WAKE_ENABLED = 'true'
 
 [http_service]

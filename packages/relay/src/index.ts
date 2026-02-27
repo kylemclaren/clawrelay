@@ -15,7 +15,7 @@ const logger = {
 async function main() {
   logger.info('[relay] Loading config...');
   const config = loadConfig();
-  logger.info(`[relay] Config: sandbox=${config.sandbox.pluginUrl} wsPath=${config.sandbox.wsPath} healthPort=${config.healthServer.port} wake=${config.wake.enabled}`);
+  logger.info(`[relay] Config: gateway=${config.gateway.url} healthPort=${config.healthServer.port} wake=${config.wake.enabled}`);
 
   const relay = new Relay(config, logger);
 

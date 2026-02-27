@@ -8,11 +8,10 @@ export interface RelayConfig {
     allowedGuilds?: string[];
     allowedChannels?: string[];
   };
-  sandbox: {
-    pluginUrl: string;
-    healthPath: string;
-    wsPath: string;
+  gateway: {
+    url: string;
     authToken: string;
+    healthPath: string;
   };
   wake: {
     enabled: boolean;
@@ -57,11 +56,10 @@ export function loadConfig(configPath?: string): RelayConfig {
       allowedGuilds: fileConfig.discord?.allowedGuilds,
       allowedChannels: fileConfig.discord?.allowedChannels,
     },
-    sandbox: {
-      pluginUrl: process.env.SANDBOX_PLUGIN_URL ?? fileConfig.sandbox?.pluginUrl ?? 'http://localhost:7600',
-      healthPath: process.env.SANDBOX_HEALTH_PATH ?? fileConfig.sandbox?.healthPath ?? '/relay/health',
-      wsPath: process.env.SANDBOX_WS_PATH ?? fileConfig.sandbox?.wsPath ?? '/relay/ws',
-      authToken: process.env.SANDBOX_AUTH_TOKEN ?? fileConfig.sandbox?.authToken ?? '',
+    gateway: {
+      url: process.env.GATEWAY_URL ?? fileConfig.gateway?.url ?? 'http://localhost:18789',
+      authToken: process.env.GATEWAY_AUTH_TOKEN ?? fileConfig.gateway?.authToken ?? '',
+      healthPath: process.env.GATEWAY_HEALTH_PATH ?? fileConfig.gateway?.healthPath ?? '/relay/health',
     },
     wake: {
       enabled: process.env.WAKE_ENABLED !== undefined
@@ -83,8 +81,8 @@ export function loadConfig(configPath?: string): RelayConfig {
   if (!config.discord.token) {
     throw new Error('Discord token is required (DISCORD_TOKEN env or discord.token in config)');
   }
-  if (!config.sandbox.authToken) {
-    throw new Error('Sandbox auth token is required (SANDBOX_AUTH_TOKEN env or sandbox.authToken in config)');
+  if (!config.gateway.authToken) {
+    throw new Error('Gateway auth token is required (GATEWAY_AUTH_TOKEN env or gateway.authToken in config)');
   }
 
   return config;

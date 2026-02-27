@@ -170,10 +170,10 @@ export class Relay {
       // Register response handler FIRST to avoid race condition
       const responsePromise = this.ws.waitForResponse(message.messageId);
 
-      // Send over WebSocket
-      this.ws.send({ type: 'message', payload: message });
+      // Send as gateway method call
+      this.ws.sendRelayMessage(message);
 
-      this.logger.info(`[relay] Sent message ${message.messageId} over WS`);
+      this.logger.info(`[relay] Sent relay.inbound for message ${message.messageId}`);
 
       // Wait for response over WS
       const response = await responsePromise;

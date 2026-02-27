@@ -1,6 +1,6 @@
-// Relay Protocol Types (shared with relay-channel plugin)
+// Relay Protocol Types
 
-// Inbound message from relay -> plugin
+// Inbound message from relay -> plugin (sent as params.message in relay.inbound)
 export interface RelayInboundMessage {
   messageId: string;
   platform: string;
@@ -14,17 +14,42 @@ export interface RelayInboundMessage {
   timestamp: number;
 }
 
-// Outbound response from plugin -> relay
+// Outbound response from plugin -> relay (returned in gateway response payload)
 export interface RelayOutboundMessage {
   messageId: string;
   content: string;
   replyToMessageId?: string;
 }
 
-// WebSocket protocol envelope
-export type WsEnvelope =
-  | { type: 'message'; payload: RelayInboundMessage }
-  | { type: 'response'; payload: RelayOutboundMessage };
+// --- Gateway protocol frame types ---
+
+export interface GatewayReqFrame {
+  type: 'req';
+  id: string;
+  method: string;
+  params?: unknown;
+}
+
+export interface GatewayResFrame {
+  type: 'res';
+  id: string;
+  ok: boolean;
+  payload?: unknown;
+  error?: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+}
+
+export interface GatewayEventFrame {
+  type: 'event';
+  event: string;
+  payload?: unknown;
+  seq?: number;
+}
+
+export type GatewayFrame = GatewayReqFrame | GatewayResFrame | GatewayEventFrame;
 
 // Internal queue entry
 export interface QueueEntry {
