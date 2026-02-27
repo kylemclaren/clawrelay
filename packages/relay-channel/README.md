@@ -24,6 +24,12 @@ Or install from a local path during development:
 openclaw plugins install ./packages/relay-channel
 ```
 
+Update to the latest version:
+
+```bash
+openclaw plugins update clawrelay
+```
+
 Or install from a tarball:
 
 ```bash

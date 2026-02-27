@@ -73,7 +73,8 @@ The gateway URL is set in `fly.toml` via the `GATEWAY_URL` env var, pointing to 
 On the sprite, install the channel plugin and start the gateway:
 
 ```bash
-openclaw plugins install clawrelay
+openclaw plugins install clawrelay    # First install
+openclaw plugins update clawrelay     # Update to latest
 openclaw onboard    # Configure the relay channel auth token
 openclaw gateway --allow-unconfigured
 ```
