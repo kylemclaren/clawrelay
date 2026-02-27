@@ -6,7 +6,8 @@
   "gateway": {
     "url": "https://your-sprite.sprites.dev",
     "authToken": "gateway-auth-token (or set GATEWAY_AUTH_TOKEN env var)",
-    "healthPath": "/relay/health"
+    "healthPath": "/relay/health",
+    "spriteToken": "sprite-api-token-from-sprites.dev/account (or set SPRITE_TOKEN env var)"
   },
   "wake": {
     "enabled": true,

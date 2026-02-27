@@ -6,12 +6,12 @@ The relay is designed to run on a cheap, always-on VPS (e.g. a $3/mo Fly.io or H
 
 ## How it works
 
-1. Discord message arrives via WebSocket
+1. Chat message arrives (Discord, Telegram, etc.)
 2. Message is queued and typing indicator starts
 3. Wake manager checks gateway health (and wakes it if needed)
 4. Relay connects to the OpenClaw gateway WS and authenticates via the gateway protocol
 5. Message is sent as a `relay.inbound` gateway method call
-6. Gateway response is delivered back to Discord as a reply
+6. Gateway response is delivered back to the originating platform as a reply
 
 ## Quick start
 
@@ -28,13 +28,28 @@ Config is loaded from `relay.config.json` (or `RELAY_CONFIG` env) with environme
 
 | Setting | Env var | Default |
 |---|---|---|
-| Discord token | `DISCORD_TOKEN` | required |
+| Discord token | `DISCORD_TOKEN` | required* |
+| Telegram bot token | `TELEGRAM_BOT_TOKEN` | required* |
 | Gateway URL | `GATEWAY_URL` | `http://localhost:18789` |
 | Gateway auth token | `GATEWAY_AUTH_TOKEN` | required |
+| Sprite API token | `SPRITE_TOKEN` | - |
 | Health path | `GATEWAY_HEALTH_PATH` | `/relay/health` |
 | Wake enabled | `WAKE_ENABLED` | `false` |
 | Wake URL | `WAKE_URL` | - |
 | Health server port | `HEALTH_PORT` | `8080` |
+
+\* At least one channel adapter (Discord or Telegram) is required.
+
+### Sprite authentication
+
+By default, sprite URLs on sprites.dev are private and require authentication. You need to provide a **Sprite API token** so the relay can authenticate its connections (WebSocket, health checks, and wake requests).
+
+1. Go to [sprites.dev/account](https://sprites.dev/account) and copy your API token
+2. Set it via env var or config:
+   - **Env var:** `SPRITE_TOKEN="your-token"`
+   - **Config file:** add `"spriteToken": "your-token"` to the `gateway` section
+
+The token is sent as a `Bearer` authorization header on all requests to the sprite. If your sprite uses a public URL, this can be omitted.
 
 ## Deploy to Fly.io
 
@@ -42,7 +57,8 @@ Config is loaded from `relay.config.json` (or `RELAY_CONFIG` env) with environme
 fly launch --no-deploy
 fly secrets set \
   DISCORD_TOKEN="..." \
-  GATEWAY_AUTH_TOKEN="..."
+  GATEWAY_AUTH_TOKEN="..." \
+  SPRITE_TOKEN="..."   # optional, for private sprite URLs
 fly deploy
 ```
 
@@ -55,8 +71,11 @@ The `fly.toml` is configured with `auto_stop_machines = "off"` and `min_machines
 | `src/index.ts` | Entry point, logger, graceful shutdown |
 | `src/config.ts` | Config loader (file + env vars) |
 | `src/relay.ts` | Core orchestration: queue, forward, typing |
-| `src/discord.ts` | discord.js adapter: connection, send, typing, message splitting |
+| `src/adapter.ts` | Abstract channel adapter interface |
+| `src/discord.ts` | Discord adapter (discord.js) |
+| `src/telegram.ts` | Telegram adapter (grammY) |
 | `src/ws-client.ts` | Gateway protocol WS client (connect handshake, method calls) |
 | `src/wake.ts` | Health polling and wake-on-message |
 | `src/health-server.ts` | Local health server for Fly.io checks |
+| `src/split-message.ts` | Message splitting for platform character limits |
 | `src/types.ts` | Shared protocol and gateway frame types |

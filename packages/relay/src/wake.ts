@@ -51,9 +51,13 @@ export class WakeManager {
     if (this.config.wake.enabled && this.config.wake.url) {
       this.logger?.info(`[relay] Waking sandbox: ${this.config.wake.url}`);
       try {
+        const wakeHeaders: Record<string, string> = { ...(this.config.wake.headers ?? {}) };
+        if (this.config.gateway.spriteToken) {
+          wakeHeaders['Authorization'] = `Bearer ${this.config.gateway.spriteToken}`;
+        }
         await fetch(this.config.wake.url, {
           method: this.config.wake.method ?? 'POST',
-          headers: this.config.wake.headers ?? {},
+          headers: wakeHeaders,
           body: this.config.wake.body,
         });
       } catch (err) {
@@ -82,7 +86,12 @@ export class WakeManager {
   private async checkHealth(): Promise<boolean> {
     const url = `${this.config.gateway.url}${this.config.gateway.healthPath}`;
     try {
+      const headers: Record<string, string> = {};
+      if (this.config.gateway.spriteToken) {
+        headers['Authorization'] = `Bearer ${this.config.gateway.spriteToken}`;
+      }
       const res = await fetch(url, {
+        headers,
         signal: AbortSignal.timeout(5_000),
       });
       if (!res.ok) return false;

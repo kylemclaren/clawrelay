@@ -16,6 +16,7 @@ export interface RelayConfig {
     url: string;
     authToken: string;
     healthPath: string;
+    spriteToken?: string;
   };
   wake: {
     enabled: boolean;
@@ -80,6 +81,7 @@ export function loadConfig(configPath?: string): RelayConfig {
       url: process.env.GATEWAY_URL ?? fileConfig.gateway?.url ?? 'http://localhost:18789',
       authToken: process.env.GATEWAY_AUTH_TOKEN ?? fileConfig.gateway?.authToken ?? '',
       healthPath: process.env.GATEWAY_HEALTH_PATH ?? fileConfig.gateway?.healthPath ?? '/relay/health',
+      spriteToken: process.env.SPRITE_TOKEN ?? fileConfig.gateway?.spriteToken,
     },
     wake: {
       enabled: process.env.WAKE_ENABLED !== undefined

@@ -165,7 +165,14 @@ export class WsClient {
     this.authenticated = false;
     this.connectNonce = null;
 
-    const ws = new WebSocket(wsUrl);
+    const wsOptions: WebSocket.ClientOptions = {};
+    if (this.config.gateway.spriteToken) {
+      wsOptions.headers = {
+        Authorization: `Bearer ${this.config.gateway.spriteToken}`,
+      };
+    }
+
+    const ws = new WebSocket(wsUrl, wsOptions);
 
     ws.on('open', () => {
       this.ws = ws;
