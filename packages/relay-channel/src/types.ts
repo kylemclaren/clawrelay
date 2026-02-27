@@ -3,7 +3,6 @@
 export interface RelayAccount {
   accountId: string;
   authToken: string;
-  port: number;
   enabled?: boolean;
 }
 
@@ -27,11 +26,3 @@ export interface RelayOutboundMessage {
   content: string;
   replyToMessageId?: string;
 }
-
-// WebSocket protocol envelope
-export type WsEnvelope =
-  | { type: 'message'; payload: RelayInboundMessage }
-  | { type: 'response'; payload: RelayOutboundMessage };
-
-// Reply function passed to message handlers
-export type ReplyFn = (response: RelayOutboundMessage) => void;

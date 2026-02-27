@@ -1,9 +1,14 @@
 {
-  "name": "@openclaw/relay-channel",
-  "version": "0.1.0",
+  "name": "clawrelay",
+  "version": "0.3.3",
   "description": "Channel relay plugin for OpenClaw — receives messages from an always-on relay proxy",
   "main": "src/index.ts",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kylemclaren/clawrelay.git",
+    "directory": "packages/relay-channel"
+  },
   "openclaw": {
     "extensions": [
       "./src/index.ts"
@@ -13,21 +18,26 @@
       "label": "Channel Relay",
       "selectionLabel": "Relay (Discord/Telegram via proxy)",
       "docsPath": "/channels/relay",
-      "blurb": "Wake-on-message proxy for Discord/Telegram via always-on relay"
+      "blurb": "Wake-on-message proxy for Discord/Telegram via always-on relay",
+      "aliases": ["relay"]
+    },
+    "install": {
+      "npmSpec": "clawrelay",
+      "localPath": "extensions/relay-channel",
+      "defaultChoice": "npm"
     }
   },
   "keywords": [
     "openclaw",
+    "openclaw-plugin",
     "relay",
     "channel",
     "discord",
+    "telegram",
     "proxy"
   ],
   "author": "Snowy Road",
   "license": "MIT",
-  "dependencies": {
-    "ws": "^8.18.0"
-  },
   "devDependencies": {
     "typescript": "^5.3.0"
   },
