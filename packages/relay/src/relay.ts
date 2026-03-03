@@ -8,6 +8,7 @@ import { TelegramAdapter } from './telegram.js';
 import { WakeManager } from './wake.js';
 import { WsClient } from './ws-client.js';
 import { HealthServer } from './health-server.js';
+import { DraftStream } from './draft-stream.js';
 
 const QUEUE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const TYPING_REFRESH_MS = 8_000;
@@ -151,6 +152,14 @@ export class Relay {
     await this.ws.ensureConnected();
   }
 
+  private get streamingEnabled(): boolean {
+    return this.config.streaming?.enabled !== false;
+  }
+
+  private get streamingThrottleMs(): number {
+    return this.config.streaming?.throttleMs ?? 1000;
+  }
+
   private async forwardAndRespond(entry: QueueEntry): Promise<void> {
     const { message, platform, channelId, messageId } = entry;
     const adapter = this.adapters.get(platform);
@@ -175,22 +184,48 @@ export class Relay {
       clearTimeout(typingTimeout);
     };
 
+    const useStreaming = this.streamingEnabled;
+    let draftStream: DraftStream | null = null;
+
     try {
       // Register response handler FIRST to avoid race condition
       const responsePromise = this.ws.waitForResponse(message.messageId);
 
-      // Send as gateway method call
-      this.ws.sendRelayMessage(message);
+      if (useStreaming) {
+        draftStream = new DraftStream({
+          adapter,
+          channelId,
+          replyToMessageId: messageId,
+          maxLength: adapter.maxMessageLength,
+          throttleMs: this.streamingThrottleMs,
+          logger: this.logger,
+        });
 
-      this.logger.info(`[relay] Sent relay.inbound for message ${message.messageId}`);
+        // Register stream delta handler before sending
+        this.ws.registerStreamHandler(message.messageId, (delta) => {
+          stopTyping();
+          draftStream!.push(delta.text);
+        });
+      }
+
+      // Send as gateway method call (with streaming flag if enabled)
+      this.ws.sendRelayMessage(message, useStreaming);
+
+      this.logger.info(`[relay] Sent relay.inbound for message ${message.messageId}${useStreaming ? ' (streaming)' : ''}`);
 
       // Wait for response over WS
       const response = await responsePromise;
 
       stopTyping();
 
-      // Send response via the originating adapter
-      await adapter.sendMessage(channelId, response.content, messageId);
+      if (draftStream) {
+        // Finalize the draft stream with the complete response
+        await draftStream.finalize(response.content);
+      } else {
+        // Non-streaming: send response as before
+        await adapter.sendMessage(channelId, response.content, messageId);
+      }
+
       this.logger.info(`[relay] Delivered response for message ${message.messageId}`);
     } catch (err) {
       stopTyping();
@@ -198,6 +233,9 @@ export class Relay {
       this.logger.error(`[relay] Failed to process message ${message.messageId}: ${errMsg}`);
       this.wake.markUnknown();
       await this.sendError(platform, channelId, `Something went wrong processing your message.`, messageId);
+    } finally {
+      if (draftStream) draftStream.dispose();
+      if (useStreaming) this.ws.removeStreamHandler(message.messageId);
     }
   }
 

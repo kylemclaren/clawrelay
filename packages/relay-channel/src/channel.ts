@@ -52,7 +52,6 @@ export function createRelayChannel(api: any) {
 
         return {
           accountId: id,
-          authToken: account.authToken,
           enabled: account.enabled !== false,
         };
       },

@@ -23,7 +23,7 @@ export function createRelayInboundHandler(api: any) {
     respond: (ok: boolean, payload?: unknown, error?: unknown) => void;
     context: any;
   }) => {
-    const { params, respond } = opts;
+    const { params, client, respond, context } = opts;
 
     const message = params.message as RelayInboundMessage | undefined;
     if (!message || !message.messageId || !message.content) {
@@ -50,7 +50,6 @@ export function createRelayInboundHandler(api: any) {
 
     const account: RelayAccount = {
       accountId,
-      authToken: accountData.authToken ?? '',
       enabled: accountData.enabled !== false,
     };
 
@@ -62,39 +61,84 @@ export function createRelayInboundHandler(api: any) {
       return;
     }
 
-    try {
-      const responseContent = await processRelayMessage({
-        message,
-        account,
-        config,
-        log: logger,
-      });
+    const streaming = params.streaming === true;
 
-      respond(true, {
-        messageId: message.messageId,
-        content: responseContent,
-        replyToMessageId: message.messageId,
-      });
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error(`[clawrelay] Failed to process inbound: ${errMsg}`);
-      respond(false, undefined, {
-        code: 'INTERNAL_ERROR',
-        message: `Error processing message: ${errMsg}`,
-      });
+    // Helper to send an event to the calling client via the gateway broadcast API
+    const sendEventToClient = (event: string, payload: unknown) => {
+      if (!client?.connId) {
+        logger.warn(`[clawrelay] Cannot send event ${event}: no client connId`);
+        return;
+      }
+      context.broadcastToConnIds(event, payload, new Set([client.connId]));
+    };
+
+    if (streaming) {
+      // Streaming mode: ack immediately, then send deltas via events
+      respond(true, { messageId: message.messageId, streaming: true });
+
+      const streamCallback = (text: string) => {
+        try {
+          sendEventToClient('relay.stream.delta', {
+            messageId: message.messageId,
+            text,
+            kind: 'deliver',
+          });
+        } catch (err) {
+          logger.debug(`[clawrelay] Failed to send stream delta: ${err}`);
+        }
+      };
+
+      try {
+        const responseContent = await processRelayMessage({
+          message,
+          account,
+          config,
+          log: logger,
+          streamCallback,
+        });
+
+        sendEventToClient('relay.stream.done', {
+          messageId: message.messageId,
+          text: responseContent,
+        });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`[clawrelay] Failed to process inbound (streaming): ${errMsg}`);
+        sendEventToClient('relay.stream.done', {
+          messageId: message.messageId,
+          text: '',
+          error: `Error processing message: ${errMsg}`,
+        });
+      }
+    } else {
+      // Non-streaming: buffered response as before
+      try {
+        const responseContent = await processRelayMessage({
+          message,
+          account,
+          config,
+          log: logger,
+        });
+
+        respond(true, {
+          messageId: message.messageId,
+          content: responseContent,
+          replyToMessageId: message.messageId,
+        });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`[clawrelay] Failed to process inbound: ${errMsg}`);
+        respond(false, undefined, {
+          code: 'INTERNAL_ERROR',
+          message: `Error processing message: ${errMsg}`,
+        });
+      }
     }
   };
 }
 
 
 // --- Inbound message processing (extracted from channel.ts) ---
-
-function resolveSessionKey(message: RelayInboundMessage): string {
-  if (message.chatType === 'direct') {
-    return `relay:${message.platform}:dm:${message.senderId}`;
-  }
-  return `relay:${message.platform}:${message.guildId ?? 'unknown'}:${message.channelId}`;
-}
 
 function resolvePeerId(message: RelayInboundMessage): string {
   if (message.chatType === 'direct') {
@@ -108,8 +152,9 @@ async function processRelayMessage(params: {
   account: RelayAccount;
   config: any;
   log: any;
+  streamCallback?: (text: string) => void;
 }): Promise<string> {
-  const { message, account, config, log } = params;
+  const { message, account, config, log, streamCallback } = params;
 
   const core = getRelayRuntime();
   const peerId = resolvePeerId(message);
@@ -190,6 +235,7 @@ async function processRelayMessage(params: {
         const text = payload.text ?? '';
         if (text.trim()) {
           parts.push(text);
+          streamCallback?.(text);
         }
       },
       onError: (err: unknown, info: { kind: string }) => {

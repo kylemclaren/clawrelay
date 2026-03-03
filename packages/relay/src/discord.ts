@@ -22,6 +22,7 @@ export interface DiscordAdapterOptions {
 
 export class DiscordAdapter implements ChannelAdapter {
   readonly platform = 'discord';
+  readonly maxMessageLength = 2000;
 
   private client: Client;
   private options: DiscordAdapterOptions;
@@ -110,7 +111,7 @@ export class DiscordAdapter implements ChannelAdapter {
     }
   }
 
-  async sendMessage(channelId: string, content: string, replyToMessageId?: string): Promise<void> {
+  async sendMessage(channelId: string, content: string, replyToMessageId?: string): Promise<string> {
     const channel = await this.client.channels.fetch(channelId);
     if (!channel || !('send' in channel)) {
       throw new Error(`Cannot send to channel ${channelId}`);
@@ -121,6 +122,7 @@ export class DiscordAdapter implements ChannelAdapter {
     // Split messages exceeding Discord's 2000 char limit
     const chunks = splitMessage(content, 2000);
 
+    let firstMessageId = '';
     for (let i = 0; i < chunks.length; i++) {
       const options: any = { content: chunks[i] };
 
@@ -129,8 +131,22 @@ export class DiscordAdapter implements ChannelAdapter {
         options.reply = { messageReference: replyToMessageId, failIfNotExists: false };
       }
 
-      await textChannel.send(options);
+      const sent = await textChannel.send(options);
+      if (i === 0) firstMessageId = sent.id;
     }
+
+    return firstMessageId;
+  }
+
+  async editMessage(channelId: string, platformMessageId: string, content: string): Promise<void> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !('messages' in channel)) {
+      throw new Error(`Cannot edit in channel ${channelId}`);
+    }
+
+    const textChannel = channel as TextChannel | DMChannel;
+    const msg = await textChannel.messages.fetch(platformMessageId);
+    await msg.edit(content);
   }
 
   async login(): Promise<void> {

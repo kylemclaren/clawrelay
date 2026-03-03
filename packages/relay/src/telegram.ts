@@ -14,6 +14,7 @@ export interface TelegramAdapterOptions {
 
 export class TelegramAdapter implements ChannelAdapter {
   readonly platform = 'telegram';
+  readonly maxMessageLength = 4096;
 
   private bot: Bot;
   private options: TelegramAdapterOptions;
@@ -77,10 +78,11 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  async sendMessage(channelId: string, content: string, replyToMessageId?: string): Promise<void> {
+  async sendMessage(channelId: string, content: string, replyToMessageId?: string): Promise<string> {
     // Split messages exceeding Telegram's 4096 char limit
     const chunks = splitMessage(content, 4096);
 
+    let firstMessageId = '';
     for (let i = 0; i < chunks.length; i++) {
       const options: any = {};
 
@@ -89,8 +91,15 @@ export class TelegramAdapter implements ChannelAdapter {
         options.reply_parameters = { message_id: Number(replyToMessageId) };
       }
 
-      await this.bot.api.sendMessage(channelId, chunks[i], options);
+      const sent = await this.bot.api.sendMessage(channelId, chunks[i], options);
+      if (i === 0) firstMessageId = String(sent.message_id);
     }
+
+    return firstMessageId;
+  }
+
+  async editMessage(channelId: string, platformMessageId: string, content: string): Promise<void> {
+    await this.bot.api.editMessageText(channelId, Number(platformMessageId), content);
   }
 
   async login(): Promise<void> {

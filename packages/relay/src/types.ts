@@ -51,6 +51,19 @@ export interface GatewayEventFrame {
 
 export type GatewayFrame = GatewayReqFrame | GatewayResFrame | GatewayEventFrame;
 
+// Streaming response types
+export interface StreamDelta {
+  messageId: string;
+  text: string;
+  kind: string;
+}
+
+export interface StreamDone {
+  messageId: string;
+  text: string;
+  error?: string;
+}
+
 // Internal queue entry
 export interface QueueEntry {
   message: RelayInboundMessage;

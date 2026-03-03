@@ -45,11 +45,7 @@ Add to `~/.openclaw/openclaw.json`:
 {
   "channels": {
     "relay": {
-      "accounts": {
-        "default": {
-          "authToken": "optional-per-account-token"
-        }
-      }
+      "enabled": true
     }
   },
   "plugins": {
@@ -61,7 +57,7 @@ Add to `~/.openclaw/openclaw.json`:
 }
 ```
 
-The gateway's own auth token (in `gateway.auth.token`) is used for authentication. The relay account `authToken` is an optional per-account verification token.
+Authentication is handled by the gateway's own auth token (`gateway.auth.token`).
 
 ## Verify installation
 
@@ -86,7 +82,7 @@ openclaw plugins doctor
 | `src/channel.ts` | Channel definition, config resolution, onboarding |
 | `src/gateway-handler.ts` | `relay.inbound` gateway method handler |
 | `src/health-handler.ts` | HTTP health route handler |
-| `src/onboarding.ts` | Setup wizard (auth token, sprite service) |
+| `src/onboarding.ts` | Setup wizard (enable channel, sprite gateway service) |
 | `src/runtime.ts` | OpenClaw runtime accessor |
 | `src/types.ts` | Protocol and config types |
 

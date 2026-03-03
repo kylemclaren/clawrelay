@@ -27,6 +27,10 @@ export interface RelayConfig {
     timeoutMs?: number;
     pollIntervalMs?: number;
   };
+  streaming?: {
+    enabled?: boolean;     // default: true
+    throttleMs?: number;   // default: 1000
+  };
   healthServer: {
     port: number;
   };
@@ -93,6 +97,12 @@ export function loadConfig(configPath?: string): RelayConfig {
       body: fileConfig.wake?.body,
       timeoutMs: fileConfig.wake?.timeoutMs ?? DEFAULTS.wake!.timeoutMs,
       pollIntervalMs: fileConfig.wake?.pollIntervalMs ?? DEFAULTS.wake!.pollIntervalMs,
+    },
+    streaming: {
+      enabled: process.env.STREAMING_ENABLED !== undefined
+        ? process.env.STREAMING_ENABLED !== 'false'
+        : fileConfig.streaming?.enabled ?? true,
+      throttleMs: Number(process.env.STREAMING_THROTTLE_MS ?? fileConfig.streaming?.throttleMs ?? 1000),
     },
     healthServer: {
       port: Number(process.env.HEALTH_PORT ?? fileConfig.healthServer?.port ?? 8080),

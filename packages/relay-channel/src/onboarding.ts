@@ -8,20 +8,107 @@ import {
   normalizeAccountId,
   promptAccountId,
 } from "openclaw/plugin-sdk";
-import crypto from "node:crypto";
+import { execSync } from "node:child_process";
+import path from "node:path";
 
 const channel = "relay" as const;
 
-function generateAuthToken(): string {
-  const bytes = crypto.randomBytes(24);
-  return `crly_${bytes.toString("base64url")}`;
+const SPRITE_ENV_BIN = "/.sprite/bin/sprite-env";
+const DEFAULT_GATEWAY_PORT = 18789;
+const GATEWAY_SERVICE_NAME = "openclaw-gateway";
+
+function isOnSprite(): boolean {
+  try {
+    execSync(`test -x ${SPRITE_ENV_BIN}`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getExistingGatewayService(): Record<string, unknown> | undefined {
+  try {
+    const out = execSync(`${SPRITE_ENV_BIN} services list`, {
+      encoding: "utf-8",
+      timeout: 5000,
+    }).trim();
+    const services: Record<string, unknown>[] = JSON.parse(out);
+    return services.find(
+      (s) => (s as any).name === GATEWAY_SERVICE_NAME,
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function findOpenclawBinary(): string | undefined {
+  const binDir = path.dirname(process.execPath);
+  const candidate = path.join(binDir, "openclaw");
+  try {
+    execSync(`test -x "${candidate}"`, { stdio: "ignore" });
+    return candidate;
+  } catch {
+    return undefined;
+  }
+}
+
+async function ensureSpriteGatewayService(
+  cfg: OpenClawConfig,
+  prompter: WizardPrompter,
+): Promise<void> {
+  if (!isOnSprite()) return;
+
+  const existing = getExistingGatewayService();
+  if (existing) {
+    await prompter.note(
+      `Sprite gateway service already exists (${GATEWAY_SERVICE_NAME}).`,
+      "Sprite",
+    );
+    return;
+  }
+
+  const openclawBin = findOpenclawBinary();
+  if (!openclawBin) {
+    await prompter.note(
+      "Could not locate the openclaw binary to create the gateway service. You may need to create it manually:\n" +
+        `  sprite-env services create ${GATEWAY_SERVICE_NAME} --cmd openclaw --args "gateway,--port,${DEFAULT_GATEWAY_PORT}" --http-port ${DEFAULT_GATEWAY_PORT}`,
+      "Sprite",
+    );
+    return;
+  }
+
+  const gwCfg = (cfg as any).gateway;
+  const port = gwCfg?.port ?? DEFAULT_GATEWAY_PORT;
+
+  const shouldCreate = await prompter.confirm({
+    message: `Create sprite gateway service (${GATEWAY_SERVICE_NAME} on port ${port})?`,
+    initialValue: true,
+  });
+
+  if (!shouldCreate) return;
+
+  try {
+    execSync(
+      `${SPRITE_ENV_BIN} services create ${GATEWAY_SERVICE_NAME} --cmd "${openclawBin}" --args "gateway,--port,${port}" --http-port ${port}`,
+      { encoding: "utf-8", timeout: 10000 },
+    );
+    await prompter.note(
+      `Gateway service created: ${GATEWAY_SERVICE_NAME} → ${openclawBin} gateway --port ${port}`,
+      "Sprite",
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await prompter.note(
+      `Failed to create gateway service: ${msg}\n\nYou can create it manually:\n` +
+        `  sprite-env services create ${GATEWAY_SERVICE_NAME} --cmd "${openclawBin}" --args "gateway,--port,${port}" --http-port ${port}`,
+      "Sprite",
+    );
+  }
 }
 
 function setRelayAccountConfig(
   cfg: OpenClawConfig,
   accountId: string,
-  defaultPatch: Record<string, unknown>,
-  accountPatch: Record<string, unknown> = defaultPatch,
 ): OpenClawConfig {
   if (accountId === DEFAULT_ACCOUNT_ID) {
     return {
@@ -31,7 +118,6 @@ function setRelayAccountConfig(
         relay: {
           ...cfg.channels?.relay,
           enabled: true,
-          ...defaultPatch,
         },
       },
     } as OpenClawConfig;
@@ -48,7 +134,6 @@ function setRelayAccountConfig(
           [accountId]: {
             ...cfg.channels?.relay?.accounts?.[accountId],
             enabled: cfg.channels?.relay?.accounts?.[accountId]?.enabled ?? true,
-            ...accountPatch,
           },
         },
       },
@@ -66,31 +151,12 @@ function resolveDefaultRelayAccountId(cfg: OpenClawConfig): string {
   return ids[0] ?? DEFAULT_ACCOUNT_ID;
 }
 
-function getExistingToken(cfg: OpenClawConfig, accountId: string): string | undefined {
-  const relay = (cfg.channels as any)?.relay;
-  if (accountId === DEFAULT_ACCOUNT_ID) {
-    return relay?.authToken;
-  }
-  return relay?.accounts?.[accountId]?.authToken;
-}
-
 export const relayOnboardingAdapter: ChannelOnboardingAdapter = {
   channel,
 
   getStatus: async ({ cfg }) => {
-    const ids = listRelayAccountIds(cfg);
     const relay = (cfg.channels as any)?.relay;
-
-    // Check default account (top-level authToken) or any named account
-    let configured = Boolean(relay?.authToken);
-    if (!configured) {
-      for (const id of ids) {
-        if (relay?.accounts?.[id]?.authToken) {
-          configured = true;
-          break;
-        }
-      }
-    }
+    const configured = relay?.enabled === true;
 
     return {
       channel,
@@ -114,11 +180,11 @@ export const relayOnboardingAdapter: ChannelOnboardingAdapter = {
     await prompter.note(
       [
         "ClawRelay bridges Discord/Telegram to OpenClaw via a",
-        "lightweight always-on relay service. This wizard configures",
-        "the channel plugin side (auth token).",
+        "lightweight always-on relay service. This wizard enables",
+        "the channel plugin and configures the gateway service.",
         "",
         "The relay service connects to the OpenClaw gateway via WS",
-        "and calls the relay.inbound method. No separate port needed.",
+        "and authenticates using the gateway auth token.",
         "",
         "You'll deploy the relay service separately afterwards.",
       ].join("\n"),
@@ -143,57 +209,17 @@ export const relayOnboardingAdapter: ChannelOnboardingAdapter = {
       });
     }
 
-    let next = cfg;
-
-    // --- Auth Token (optional per-account verification token) ---
-    const existingToken = getExistingToken(next, accountId);
-    let authToken: string;
-
-    if (existingToken) {
-      const keepToken = await prompter.confirm({
-        message: `Auth token already set (${existingToken.slice(0, 12)}...). Keep it?`,
-        initialValue: true,
-      });
-      if (keepToken) {
-        authToken = existingToken;
-      } else {
-        authToken = await promptAuthToken(prompter);
-      }
-    } else {
-      authToken = await promptAuthToken(prompter);
-    }
-
     // --- Write config ---
-    next = setRelayAccountConfig(next, accountId, {
-      authToken,
-    });
+    const next = setRelayAccountConfig(cfg, accountId);
+
+    // --- Sprite gateway service ---
+    await ensureSpriteGatewayService(next, prompter);
 
     await prompter.note(
-      `Relay channel configured (token: ${authToken.slice(0, 12)}...). Select Finished below, then deploy the relay service.`,
+      "Relay channel enabled. Select Finished below, then deploy the relay service.",
       "Relay",
     );
 
     return { cfg: next, accountId };
   },
 };
-
-async function promptAuthToken(prompter: WizardPrompter): Promise<string> {
-  const generated = generateAuthToken();
-  const useGenerated = await prompter.confirm({
-    message: `Use auto-generated token? (${generated})`,
-    initialValue: true,
-  });
-
-  if (useGenerated) {
-    return generated;
-  }
-
-  const custom = await prompter.text({
-    message: "Enter your auth token",
-    validate: (value) =>
-      String(value ?? "").trim().length >= 8
-        ? undefined
-        : "Token must be at least 8 characters",
-  });
-  return String(custom).trim();
-}

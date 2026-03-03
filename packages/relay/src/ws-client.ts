@@ -10,6 +10,8 @@ import type { RelayConfig } from './config.js';
 import type {
   RelayInboundMessage,
   RelayOutboundMessage,
+  StreamDelta,
+  StreamDone,
   GatewayReqFrame,
   GatewayResFrame,
   GatewayEventFrame,
@@ -24,7 +26,7 @@ interface PendingResponse {
 }
 
 const IDLE_DISCONNECT_MS = 60_000;
-const RELAY_CLIENT_VERSION = '0.3.0';
+const RELAY_CLIENT_VERSION = '0.4.0';
 
 export class WsClient {
   private config: RelayConfig;
@@ -32,6 +34,8 @@ export class WsClient {
   private ws: WebSocket | null = null;
   private pending = new Map<string, PendingResponse>(); // requestId -> PendingResponse
   private messageIdToRequestId = new Map<string, string>(); // messageId -> requestId
+  private streamHandlers = new Map<string, (delta: StreamDelta) => void>(); // messageId -> handler
+  private streamDoneResolvers = new Map<string, (done: StreamDone) => void>(); // messageId -> resolver
   private reconnectTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private backoff = 1000;
@@ -72,6 +76,10 @@ export class WsClient {
     }
     this.pending.clear();
 
+    // Clean up stream handlers
+    this.streamHandlers.clear();
+    this.streamDoneResolvers.clear();
+
     this.closeWs();
   }
 
@@ -104,8 +112,9 @@ export class WsClient {
   /**
    * Send a relay.inbound method call to the gateway.
    * The message is wrapped in a gateway request frame.
+   * Pass streaming=true to request progressive stream deltas.
    */
-  sendRelayMessage(message: RelayInboundMessage): void {
+  sendRelayMessage(message: RelayInboundMessage, streaming?: boolean): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.authenticated) {
       throw new Error('Gateway not connected');
     }
@@ -116,13 +125,28 @@ export class WsClient {
       type: 'req',
       id: requestId,
       method: 'relay.inbound',
-      params: { message },
+      params: { message, ...(streaming ? { streaming: true } : {}) },
     };
 
     // Store mapping so waitForResponse can find the pending entry
     this.messageIdToRequestId.set(message.messageId, requestId);
 
     this.ws.send(JSON.stringify(frame));
+  }
+
+  /**
+   * Register a handler to receive stream deltas for a given messageId.
+   */
+  registerStreamHandler(messageId: string, onDelta: (delta: StreamDelta) => void): void {
+    this.streamHandlers.set(messageId, onDelta);
+  }
+
+  /**
+   * Remove stream handler for a given messageId.
+   */
+  removeStreamHandler(messageId: string): void {
+    this.streamHandlers.delete(messageId);
+    this.streamDoneResolvers.delete(messageId);
   }
 
   /**
@@ -240,6 +264,20 @@ export class WsClient {
       this.connectNonce = payload?.nonce ?? null;
       this.logger.info('[ws-client] Received connect.challenge, sending connect...');
       this.sendConnect();
+    } else if (frame.event === 'relay.stream.delta') {
+      const delta = frame.payload as StreamDelta | undefined;
+      if (delta?.messageId) {
+        const handler = this.streamHandlers.get(delta.messageId);
+        handler?.(delta);
+      }
+    } else if (frame.event === 'relay.stream.done') {
+      const done = frame.payload as StreamDone | undefined;
+      if (done?.messageId) {
+        const resolver = this.streamDoneResolvers.get(done.messageId);
+        resolver?.(done);
+        this.streamHandlers.delete(done.messageId);
+        this.streamDoneResolvers.delete(done.messageId);
+      }
     } else if (frame.event === 'tick') {
       // Keepalive tick from gateway — ignore
     } else {
@@ -310,24 +348,7 @@ export class WsClient {
     // Handle relay.inbound response — look up by requestId
     const entry = this.pending.get(frame.id);
     if (entry) {
-      clearTimeout(entry.timer);
-      this.pending.delete(frame.id);
-      this.messageIdToRequestId.delete(entry.messageId);
-
-      if (frame.ok) {
-        const payload = frame.payload as RelayOutboundMessage | undefined;
-        if (payload) {
-          entry.resolve(payload);
-          this.logger.debug(`[ws-client] Response received for request ${frame.id}`);
-        } else {
-          entry.reject(new Error(`Empty response payload for request ${frame.id}`));
-        }
-      } else {
-        const errMsg = frame.error?.message ?? 'Unknown error';
-        entry.reject(new Error(`Gateway error: ${errMsg}`));
-      }
-
-      this.maybeStartIdleTimer();
+      this.resolveOrDeferEntry(frame, entry, frame.id);
       return;
     }
 
@@ -335,28 +356,67 @@ export class WsClient {
     // The placeholder entries use `pending-{messageId}` as key
     for (const [key, pendingEntry] of this.pending) {
       if (key.startsWith('pending-') && this.messageIdToRequestId.get(pendingEntry.messageId) === frame.id) {
-        clearTimeout(pendingEntry.timer);
-        this.pending.delete(key);
-        this.messageIdToRequestId.delete(pendingEntry.messageId);
-
-        if (frame.ok) {
-          const payload = frame.payload as RelayOutboundMessage | undefined;
-          if (payload) {
-            pendingEntry.resolve(payload);
-          } else {
-            pendingEntry.reject(new Error(`Empty response payload for request ${frame.id}`));
-          }
-        } else {
-          const errMsg = frame.error?.message ?? 'Unknown error';
-          pendingEntry.reject(new Error(`Gateway error: ${errMsg}`));
-        }
-
-        this.maybeStartIdleTimer();
+        this.resolveOrDeferEntry(frame, pendingEntry, key);
         return;
       }
     }
 
     this.logger.warn(`[ws-client] Response for unknown request ${frame.id}`);
+  }
+
+  /**
+   * Resolve a pending entry, or defer resolution if the response indicates streaming.
+   * When streaming, the initial response is just an ack — the real resolution happens
+   * when relay.stream.done arrives.
+   */
+  private resolveOrDeferEntry(frame: GatewayResFrame, entry: PendingResponse, pendingKey: string): void {
+    if (!frame.ok) {
+      clearTimeout(entry.timer);
+      this.pending.delete(pendingKey);
+      this.messageIdToRequestId.delete(entry.messageId);
+      const errMsg = frame.error?.message ?? 'Unknown error';
+      entry.reject(new Error(`Gateway error: ${errMsg}`));
+      this.maybeStartIdleTimer();
+      return;
+    }
+
+    const payload = frame.payload as (RelayOutboundMessage & { streaming?: boolean }) | undefined;
+
+    if (payload?.streaming) {
+      // Streaming ack — don't resolve yet. Register a stream-done resolver
+      // that will resolve the pending promise when relay.stream.done arrives.
+      this.logger.debug(`[ws-client] Streaming ack for message ${entry.messageId}`);
+      this.streamDoneResolvers.set(entry.messageId, (done: StreamDone) => {
+        clearTimeout(entry.timer);
+        this.pending.delete(pendingKey);
+        this.messageIdToRequestId.delete(entry.messageId);
+
+        if (done.error) {
+          entry.reject(new Error(`Stream error: ${done.error}`));
+        } else {
+          entry.resolve({
+            messageId: done.messageId,
+            content: done.text,
+            replyToMessageId: done.messageId,
+          });
+        }
+        this.maybeStartIdleTimer();
+      });
+      return;
+    }
+
+    // Non-streaming — resolve immediately
+    clearTimeout(entry.timer);
+    this.pending.delete(pendingKey);
+    this.messageIdToRequestId.delete(entry.messageId);
+
+    if (payload) {
+      entry.resolve(payload);
+      this.logger.debug(`[ws-client] Response received for request ${frame.id}`);
+    } else {
+      entry.reject(new Error(`Empty response payload for request ${frame.id}`));
+    }
+    this.maybeStartIdleTimer();
   }
 
   private maybeStartIdleTimer(): void {

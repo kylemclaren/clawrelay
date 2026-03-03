@@ -2,7 +2,6 @@
 
 export interface RelayAccount {
   accountId: string;
-  authToken: string;
   enabled?: boolean;
 }
 

@@ -37,7 +37,7 @@ const plugin = {
     api.registerGatewayMethod('relay.inbound', relayInboundHandler);
 
     // Register HTTP health route on the gateway's HTTP server
-    api.registerHttpRoute({ path: '/relay/health', handler: relayHealthHandler });
+    api.registerHttpRoute({ path: '/relay/health', auth: 'plugin', handler: relayHealthHandler });
 
     logger.info('[clawrelay] Relay channel plugin registered (gateway method + HTTP health)');
   },
