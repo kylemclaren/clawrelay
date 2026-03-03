@@ -76,12 +76,12 @@ export function createRelayInboundHandler(api: any) {
       // Streaming mode: ack immediately, then send deltas via events
       respond(true, { messageId: message.messageId, streaming: true });
 
-      const streamCallback = (text: string) => {
+      const onPartialText = (text: string) => {
         try {
           sendEventToClient('relay.stream.delta', {
             messageId: message.messageId,
             text,
-            kind: 'deliver',
+            kind: 'partial',
           });
         } catch (err) {
           logger.debug(`[clawrelay] Failed to send stream delta: ${err}`);
@@ -94,7 +94,7 @@ export function createRelayInboundHandler(api: any) {
           account,
           config,
           log: logger,
-          streamCallback,
+          onPartialText,
         });
 
         sendEventToClient('relay.stream.done', {
@@ -152,9 +152,9 @@ async function processRelayMessage(params: {
   account: RelayAccount;
   config: any;
   log: any;
-  streamCallback?: (text: string) => void;
+  onPartialText?: (text: string) => void;
 }): Promise<string> {
-  const { message, account, config, log, streamCallback } = params;
+  const { message, account, config, log, onPartialText } = params;
 
   const core = getRelayRuntime();
   const peerId = resolvePeerId(message);
@@ -224,7 +224,7 @@ async function processRelayMessage(params: {
     },
   });
 
-  // Dispatch reply — collect all deliver() calls into a single buffer
+  // Dispatch reply — collect final deliver() calls and stream partial text
   const parts: string[] = [];
 
   await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
@@ -235,13 +235,23 @@ async function processRelayMessage(params: {
         const text = payload.text ?? '';
         if (text.trim()) {
           parts.push(text);
-          streamCallback?.(text);
         }
       },
       onError: (err: unknown, info: { kind: string }) => {
         log?.error(`[clawrelay] ${info.kind} reply failed: ${String(err)}`);
       },
     },
+    // Stream progressive text via onPartialReply (fires as tokens arrive)
+    replyOptions: onPartialText
+      ? {
+          onPartialReply: (payload: { text?: string }) => {
+            const text = payload.text ?? '';
+            if (text.trim()) {
+              onPartialText(text);
+            }
+          },
+        }
+      : undefined,
   });
 
   log?.info(`[clawrelay] Processed message ${message.messageId} from ${message.senderName}`);

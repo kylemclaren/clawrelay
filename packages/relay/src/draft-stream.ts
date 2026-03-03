@@ -1,8 +1,13 @@
 // DraftStream - Progressive message editing manager
 //
 // Sends an initial message then edits it with accumulated text at throttled
-// intervals, matching native OpenClaw channel streaming behavior. Handles
-// message splitting when content exceeds platform limits.
+// intervals, matching native OpenClaw channel streaming behavior.
+//
+// Modeled after OpenClaw's draft-stream-loop pattern:
+// - Smart throttle based on time since last send
+// - Stops streaming when text exceeds platform max chars
+// - Deduplicates edits when text hasn't changed
+// - Splits only during finalization, not during streaming
 
 import type { ChannelAdapter } from './adapter.js';
 import { splitMessage } from './split-message.js';
@@ -24,82 +29,51 @@ export class DraftStream {
   private throttleMs: number;
   private logger: any;
 
+  // Stream state
   private platformMessageId: string | null = null;
   private accumulated = '';
+  private lastSentText = '';
+  private stopped = false;
+
+  // Throttle loop state (matches OpenClaw's draft-stream-loop pattern)
+  private lastSentAt = 0;
+  private inFlightPromise: Promise<void | boolean> | null = null;
   private throttleTimer: NodeJS.Timeout | null = null;
-  private pendingFlush = false;
-  private flushPromise: Promise<void> | null = null;
-  private disposed = false;
 
   constructor(opts: DraftStreamOptions) {
     this.adapter = opts.adapter;
     this.channelId = opts.channelId;
     this.replyToMessageId = opts.replyToMessageId;
     this.maxLength = opts.maxLength;
-    this.throttleMs = opts.throttleMs;
+    this.throttleMs = Math.max(250, opts.throttleMs);
     this.logger = opts.logger ?? console;
   }
 
   /**
-   * Append new text from a stream delta. Schedules a throttled flush.
+   * Update with the latest accumulated text. Replaces any pending text
+   * (onPartialReply sends the full text each time, not incremental deltas).
    */
   push(text: string): void {
-    if (this.disposed) return;
-
-    if (this.accumulated) {
-      this.accumulated += '\n' + text;
-    } else {
-      this.accumulated = text;
-    }
-
-    this.scheduleFlush();
-  }
-
-  /**
-   * Flush accumulated text to the platform — send or edit the message.
-   */
-  private async flush(): Promise<void> {
-    if (this.disposed || !this.accumulated) return;
-
-    try {
-      // If accumulated exceeds max length, finalize current message and start new
-      if (this.accumulated.length > this.maxLength) {
-        await this.handleOverflow();
-        return;
-      }
-
-      if (!this.platformMessageId) {
-        // First message — send it
-        this.platformMessageId = await this.adapter.sendMessage(
-          this.channelId,
-          this.accumulated,
-          this.replyToMessageId,
-        );
-      } else {
-        // Edit existing message with updated content
-        await this.adapter.editMessage(this.channelId, this.platformMessageId, this.accumulated);
-      }
-    } catch (err) {
-      this.logger.debug(`[draft-stream] Flush failed: ${err}`);
-    }
+    if (this.stopped) return;
+    this.accumulated = text;
+    this.schedule();
   }
 
   /**
    * Finalize the stream with the complete response text.
-   * Waits for any in-flight flush, then sends the final edit.
+   * Waits for any in-flight send, then delivers the final content
+   * (splitting into multiple messages if needed).
    */
   async finalize(finalText: string): Promise<void> {
-    if (this.disposed) return;
-    this.cancelThrottle();
+    // Cancel any scheduled flush
+    this.clearTimer();
 
-    // Wait for any in-flight flush to complete so platformMessageId is set
-    if (this.flushPromise) {
-      await this.flushPromise;
+    // Wait for any in-flight send to complete so platformMessageId is set
+    if (this.inFlightPromise) {
+      await this.inFlightPromise;
     }
 
-    if (!finalText.trim()) {
-      return;
-    }
+    if (!finalText.trim()) return;
 
     try {
       if (finalText.length > this.maxLength) {
@@ -127,76 +101,104 @@ export class DraftStream {
   }
 
   /**
-   * Clean up timers and mark as disposed.
+   * Clean up timers and mark as stopped.
    */
   dispose(): void {
-    this.disposed = true;
-    this.cancelThrottle();
+    this.stopped = true;
+    this.clearTimer();
   }
 
-  private scheduleFlush(): void {
-    if (this.flushPromise || this.throttleTimer) {
-      // A flush is in-flight or already scheduled — just mark pending
-      this.pendingFlush = true;
+  // --- Throttle loop (modeled after OpenClaw's createDraftStreamLoop) ---
+
+  private schedule(): void {
+    if (this.throttleTimer) return;
+
+    if (this.inFlightPromise) {
+      // In-flight — the flush loop will pick up new text after the send completes
       return;
     }
 
-    // Execute flush immediately if this is the first push (no message sent yet)
-    if (!this.platformMessageId) {
-      this.doFlush();
-      return;
-    }
-
-    // Otherwise throttle
-    this.throttleTimer = setTimeout(() => {
-      this.throttleTimer = null;
-      this.doFlush();
-    }, this.throttleMs);
-  }
-
-  private doFlush(): void {
-    this.pendingFlush = false;
-    this.flushPromise = this.flush().then(() => {
-      this.flushPromise = null;
-      // If more text arrived during flush, schedule another
-      if (this.pendingFlush && !this.disposed) {
-        if (!this.platformMessageId) {
-          this.doFlush();
-        } else {
-          this.throttleTimer = setTimeout(() => {
-            this.throttleTimer = null;
-            this.doFlush();
-          }, this.throttleMs);
-        }
-      }
-    });
-  }
-
-  private async handleOverflow(): Promise<void> {
-    const chunks = splitMessage(this.accumulated, this.maxLength);
-
-    if (this.platformMessageId) {
-      await this.adapter.editMessage(this.channelId, this.platformMessageId, chunks[0]);
+    // Calculate dynamic delay based on time since last send
+    const delay = Math.max(0, this.throttleMs - (Date.now() - this.lastSentAt));
+    if (delay === 0) {
+      void this.flush();
     } else {
-      this.platformMessageId = await this.adapter.sendMessage(
-        this.channelId,
-        chunks[0],
-        this.replyToMessageId,
-      );
+      this.throttleTimer = setTimeout(() => {
+        this.throttleTimer = null;
+        void this.flush();
+      }, delay);
     }
-
-    for (let i = 1; i < chunks.length; i++) {
-      this.platformMessageId = await this.adapter.sendMessage(this.channelId, chunks[i]);
-    }
-
-    this.accumulated = chunks[chunks.length - 1];
   }
 
-  private cancelThrottle(): void {
+  private async flush(): Promise<void> {
+    this.clearTimer();
+
+    while (!this.stopped) {
+      if (this.inFlightPromise) {
+        await this.inFlightPromise;
+        continue;
+      }
+
+      const text = this.accumulated.trimEnd();
+      if (!text) {
+        this.accumulated = '';
+        return;
+      }
+
+      // Dedup — skip if text hasn't changed since last send
+      if (text === this.lastSentText) return;
+
+      // Stop streaming if text exceeds platform limit (don't split mid-stream)
+      if (text.length > this.maxLength) {
+        this.stopped = true;
+        this.logger.debug(
+          `[draft-stream] Streaming stopped (text length ${text.length} > ${this.maxLength})`,
+        );
+        return;
+      }
+
+      const sent = this.sendOrEdit(text);
+      this.inFlightPromise = sent;
+
+      const ok = await sent;
+
+      if (this.inFlightPromise === sent) {
+        this.inFlightPromise = null;
+      }
+
+      if (!ok) return;
+
+      this.lastSentAt = Date.now();
+      this.lastSentText = text;
+
+      // If no new text arrived during the send, we're done
+      if (this.accumulated.trimEnd() === text) return;
+    }
+  }
+
+  private async sendOrEdit(text: string): Promise<boolean> {
+    try {
+      if (this.platformMessageId) {
+        await this.adapter.editMessage(this.channelId, this.platformMessageId, text);
+      } else {
+        this.platformMessageId = await this.adapter.sendMessage(
+          this.channelId,
+          text,
+          this.replyToMessageId,
+        );
+      }
+      return true;
+    } catch (err) {
+      this.stopped = true;
+      this.logger.debug(`[draft-stream] Send/edit failed, stopping: ${err}`);
+      return false;
+    }
+  }
+
+  private clearTimer(): void {
     if (this.throttleTimer) {
       clearTimeout(this.throttleTimer);
       this.throttleTimer = null;
     }
-    this.pendingFlush = false;
   }
 }

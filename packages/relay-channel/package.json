@@ -1,6 +1,6 @@
 {
   "name": "clawrelay",
-  "version": "0.3.8",
+  "version": "0.4.0",
   "description": "Channel relay plugin for OpenClaw — receives messages from an always-on relay proxy",
   "main": "src/index.ts",
   "type": "module",
