@@ -10,8 +10,10 @@ The relay is designed to run on a cheap, always-on VPS (e.g. a $3/mo Fly.io or H
 2. Message is queued and typing indicator starts
 3. Wake manager checks gateway health (and wakes it if needed)
 4. Relay connects to the OpenClaw gateway WS and authenticates via the gateway protocol
-5. Message is sent as a `relay.inbound` gateway method call
-6. Gateway response is delivered back to the originating platform as a reply
+5. Message is sent as a `relay.inbound` gateway method call (with streaming flag)
+6. As the AI generates tokens, `relay.stream.delta` events carry the accumulated text back to the relay
+7. A DraftStream progressively edits the platform message at a throttled rate (send → edit loop)
+8. On completion, `relay.stream.done` delivers the final response, which is split across messages if it exceeds the platform limit
 
 ## Quick start
 
@@ -36,6 +38,8 @@ Config is loaded from `relay.config.json` (or `RELAY_CONFIG` env) with environme
 | Health path | `GATEWAY_HEALTH_PATH` | `/relay/health` |
 | Wake enabled | `WAKE_ENABLED` | `false` |
 | Wake URL | `WAKE_URL` | - |
+| Streaming enabled | `STREAMING_ENABLED` | `true` |
+| Streaming throttle | `STREAMING_THROTTLE_MS` | `1000` |
 | Health server port | `HEALTH_PORT` | `8080` |
 
 \* At least one channel adapter (Discord or Telegram) is required.
@@ -74,7 +78,8 @@ The `fly.toml` is configured with `auto_stop_machines = "off"` and `min_machines
 | `src/adapter.ts` | Abstract channel adapter interface |
 | `src/discord.ts` | Discord adapter (discord.js) |
 | `src/telegram.ts` | Telegram adapter (grammY) |
-| `src/ws-client.ts` | Gateway protocol WS client (connect handshake, method calls) |
+| `src/ws-client.ts` | Gateway protocol WS client (connect handshake, method calls, stream events) |
+| `src/draft-stream.ts` | Progressive message editing manager (send → edit throttle loop) |
 | `src/wake.ts` | Health polling and wake-on-message |
 | `src/health-server.ts` | Local health server for Fly.io checks |
 | `src/split-message.ts` | Message splitting for platform character limits |

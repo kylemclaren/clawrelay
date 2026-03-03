@@ -26,14 +26,16 @@ The relay stays connected to Discord and Telegram 24/7, queues incoming messages
 3. Message is queued; typing indicator starts on the originating platform
 4. Wake manager checks gateway health at `/relay/health` (wakes sprite if needed)
 5. Relay connects to the OpenClaw gateway WS and authenticates via the gateway protocol
-6. Message is sent as a `relay.inbound` gateway method call
+6. Message is sent as a `relay.inbound` gateway method call (with streaming flag)
 7. The channel plugin dispatches the message through the OpenClaw agent pipeline
-8. Agent response is returned in the gateway method response
-9. Relay delivers the response back to the originating platform as a reply
+8. As tokens arrive, partial text streams back via `relay.stream.delta` events
+9. The relay progressively edits the platform message with accumulated text (DraftStream)
+10. On completion, `relay.stream.done` delivers the final response, which is split across messages if needed
 
 ## Features
 
 - **Multi-platform** — Supports Discord and Telegram via a shared adapter interface; run one or both simultaneously
+- **Streaming responses** — Progressive message editing as tokens arrive (send → edit loop), matching native OpenClaw channel behavior
 - **Gateway protocol** — Relay authenticates as a gateway client and sends messages as method calls (no separate server port needed)
 - **Wake-on-message** — Wakes a sleeping sprite on first message, polls `/relay/health` until ready
 - **Message queue** — In-memory FIFO with 5-minute TTL, serial processing
@@ -53,9 +55,12 @@ Config is loaded from `relay.config.json` (or `RELAY_CONFIG` env) with environme
 | Telegram bot token | `TELEGRAM_BOT_TOKEN` | — |
 | Gateway URL | `GATEWAY_URL` | `http://localhost:18789` |
 | Gateway auth token | `GATEWAY_AUTH_TOKEN` | — (required) |
+| Sprite API token | `SPRITE_TOKEN` | — |
 | Health path | `GATEWAY_HEALTH_PATH` | `/relay/health` |
 | Wake enabled | `WAKE_ENABLED` | `false` |
 | Wake URL | `WAKE_URL` | — |
+| Streaming enabled | `STREAMING_ENABLED` | `true` |
+| Streaming throttle | `STREAMING_THROTTLE_MS` | `1000` |
 | Health server port | `HEALTH_PORT` | `8080` |
 
 At least one platform token (Discord or Telegram) is required. Both can be configured to run simultaneously.
@@ -70,7 +75,7 @@ The relay runs on Fly.io, connected to an OpenClaw gateway running on a sprite.
 # Deploy the relay
 cd packages/relay
 fly deploy
-fly secrets set DISCORD_TOKEN="..." TELEGRAM_BOT_TOKEN="..." GATEWAY_AUTH_TOKEN="..."
+fly secrets set DISCORD_TOKEN="..." TELEGRAM_BOT_TOKEN="..." GATEWAY_AUTH_TOKEN="..." SPRITE_TOKEN="..."
 ```
 
 The gateway URL is set in `fly.toml` via the `GATEWAY_URL` env var, pointing to the sprite's public URL (e.g. `https://my-app.sprites.app`).

@@ -6,9 +6,10 @@ OpenClaw channel plugin that receives forwarded messages from an always-on relay
 
 1. Plugin registers a `relay.inbound` gateway method and a `/relay/health` HTTP route on the gateway's existing server
 2. The relay service connects to the gateway via WebSocket and authenticates using the gateway protocol
-3. Inbound messages arrive as `relay.inbound` method calls
+3. Inbound messages arrive as `relay.inbound` method calls (with an optional `streaming` flag)
 4. Messages are dispatched through the OpenClaw agent pipeline
-5. Agent responses are returned in the gateway method response
+5. In streaming mode, partial text is sent back to the relay client as `relay.stream.delta` events via `onPartialReply`, followed by a `relay.stream.done` event with the final response
+6. In non-streaming mode, the complete response is returned in the gateway method response
 
 ## Installation
 
@@ -34,7 +35,7 @@ Or install from a tarball:
 
 ```bash
 cd packages/relay-channel && npm pack
-openclaw plugins install clawrelay-0.3.0.tgz
+openclaw plugins install clawrelay-0.4.0.tgz
 ```
 
 ## Gateway configuration
@@ -73,6 +74,8 @@ openclaw plugins doctor
 |---|---|---|
 | HTTP | `GET /relay/health` | Health check — returns `{"status":"ok","ready":true}` |
 | Gateway | `relay.inbound` | Gateway method for receiving relay messages |
+| Gateway event | `relay.stream.delta` | Streaming partial text back to the relay client |
+| Gateway event | `relay.stream.done` | Final response (or error) sent when streaming completes |
 
 ## Source files
 
